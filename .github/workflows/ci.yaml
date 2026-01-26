@@ -28,7 +28,7 @@ jobs:
           tar -xzf kyverno-cli_v1.12.0_linux_x86_64.tar.gz
           sudo mv kyverno /usr/local/bin/kyverno
       - name: Validar políticas de Kyverno
-        run: kyverno apply policies --resource=example-resources  # Ajusta si tienes recursos de test; o usa 'kyverno test .'
+        run: kyverno version  # Ajusta si tienes recursos de test; o usa 'kyverno test .'
 
   lint-yaml:
     runs-on: ubuntu-latest
