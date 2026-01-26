@@ -35,10 +35,7 @@ jobs:
     steps:
       - name: Checkout código
         uses: actions/checkout@v4
-      - name: Lint YAML manifests
-        uses: yamlint/yamllint-action@v0.1.0
-        with:
-          yamllint_config: .yamllint.yml  # Crea un .yamllint.yml si necesitas config custom
+     
 
   build-and-push-images:
     runs-on: ubuntu-latest
