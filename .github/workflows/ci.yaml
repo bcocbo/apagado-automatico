@@ -12,8 +12,8 @@ permissions:
 
 env:
   AWS_REGION: us-east-1  # Ajusta a tu región
-  ECR_REPOSITORY_SCALER: namespace-scaler  # Nombre de tu ECR repo para controlador
-  ECR_REPOSITORY_FRONTEND: namespace-frontend  # Para frontend
+  ECR_REPOSITORY_SCALER: namespace/scaler  # Nombre de tu ECR repo para controlador
+  ECR_REPOSITORY_FRONTEND: namespace/frontend  # Para frontend
   IMAGE_TAG: ${{ github.sha }}  # Tag único con commit SHA
 
 jobs:
