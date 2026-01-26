@@ -26,7 +26,7 @@ jobs:
         run: |
           curl -LO "https://github.com/kyverno/kyverno/releases/download/v1.12.0/kyverno-cli_v1.12.0_linux_x86_64.tar.gz"
           tar -xzf kyverno-cli_v1.12.0_linux_x86_64.tar.gz
-          sudo mv kyverno-cli /usr/local/bin/kyverno
+          sudo mv kyverno /usr/local/bin/kyverno
       - name: Validar políticas de Kyverno
         run: kyverno apply policies --resource=example-resources  # Ajusta si tienes recursos de test; o usa 'kyverno test .'
 
