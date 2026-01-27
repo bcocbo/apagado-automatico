@@ -73,7 +73,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
 
       - name: Extract metadata frontend
-        id: meta
+        id: meta-frontend
         uses: docker/metadata-action@v5
         with:
           images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_FRONTEND }}
