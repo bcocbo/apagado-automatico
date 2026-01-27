@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: namespace-scaler
+  namespace: auto-shutdown
+spec:
+  replicas: 1
+  template:
+    spec:
+      serviceAccountName: scaler-sa
+      containers:
+      - name: scaler
+        image: <tu-ecr>/namespace-scaler:latest  # Se actualiza por CI
+        env:
+        - name: AWS_REGION
+          value: us-east-1
+        - name: DYNAMODB_TABLE_SCHED
+          value: NamespaceSchedules
+        - name: TIMEZONE
+          value: America/Bogota
+        - name: SYSTEM_NAMESPACES
+          value: kube-system,kube-public,kube-node-lease,default,argocd,kyverno,auto-shutdown,karpenter

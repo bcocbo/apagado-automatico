@@ -1,0 +1,70 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: apagado-automatico
+  namespace: argocd
+spec:
+  sourceRepos:
+  - '*'
+  destinations:
+  - namespace: '*'
+    server: https://kubernetes.default.svc
+
+---
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: apagado-controller
+  namespace: argocd
+spec:
+  project: apagado-automatico
+  source:
+    repoURL: https://github.com/bcocbo/apagado-automatico.git
+    path: controller
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: auto-shutdown
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+
+---
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: apagado-frontend
+  namespace: argocd
+spec:
+  project: apagado-automatico
+  source:
+    repoURL: https://github.com/bcocbo/apagado-automatico.git
+    path: frontend
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: auto-shutdown
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+
+---
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: apagado-policies
+  namespace: argocd
+spec:
+  project: apagado-automatico
+  source:
+    repoURL: https://github.com/bcocbo/apagado-automatico.git
+    path: policies
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
