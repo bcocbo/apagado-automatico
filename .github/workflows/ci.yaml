@@ -53,20 +53,44 @@ jobs:
         
       - name: Login a ECR
         uses: aws-actions/amazon-ecr-login@v2
+      - name: Extract metadata scaler
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_SCALER }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}  
+
       - name: Build y push imagen controlador
         id: build-scaler
         uses: docker/build-push-action@v6
         with:
           context: controller
           push: true
-          tags: ${{ secrets.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY_SCALER }}:${{ env.IMAGE_TAG }}
+          tags: ${{ steps.meta.outputs.tags }}
+
+      - name: Extract metadata frontend
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_FRONTEND }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}    
+
       - name: Build y push imagen frontend
         id: build-frontend
         uses: docker/build-push-action@v6
         with:
           context: frontend
           push: true
-          tags: ${{ secrets.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY_FRONTEND }}:${{ env.IMAGE_TAG }}
+          tags: ${{ steps.meta.outputs.tags }}
+      
       - name: Scan imágenes con Trivy
         uses: aquasecurity/trivy-action@master
         with:
