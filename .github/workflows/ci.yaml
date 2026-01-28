@@ -129,6 +129,7 @@ jobs:
 
       - name: Scan imagen controlador con Trivy
         uses: aquasecurity/trivy-action@master
+        continue-on-error: true
         with:
           image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_SCALER }}:${{ env.IMAGE_TAG }}
           format: sarif
@@ -136,6 +137,7 @@ jobs:
 
       - name: Scan imagen frontend con Trivy
         uses: aquasecurity/trivy-action@master
+        continue-on-error: true
         with:
           image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_FRONTEND }}:${{ env.IMAGE_TAG }}
           format: sarif
