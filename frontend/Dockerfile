@@ -7,7 +7,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Instalar dependencias
-RUN npm ci --only=production
+RUN npm install --only=production --silent
 
 # Copiar código fuente
 COPY . .
@@ -22,8 +22,8 @@ FROM nginx:alpine
 RUN addgroup -g 1001 -S appuser && \
     adduser -S appuser -G appuser -u 1001
 
-# Copiar archivos build
-COPY --from=builder /app/dist /usr/share/nginx/html
+# Copiar archivos build desde la carpeta build (no dist)
+COPY --from=builder /app/build /usr/share/nginx/html
 
 # Configuración nginx personalizada
 COPY nginx.conf /etc/nginx/nginx.conf
