@@ -192,8 +192,8 @@ jobs:
         run: |
           # Construir las URLs de las imágenes usando el registry ECR conocido
           ECR_REGISTRY="${{ steps.login-ecr.outputs.registry }}"
-          CONTROLLER_IMAGE="${ECR_REGISTRY}/${{ env.ECR_REPOSITORY_SCALER }}:${{ github.sha }}"
-          FRONTEND_IMAGE="${ECR_REGISTRY}/${{ env.ECR_REPOSITORY_FRONTEND }}:${{ github.sha }}"
+          CONTROLLER_IMAGE="${ECR_REGISTRY}/${{ env.ECR_REPOSITORY_SCALER }}:latest"
+          FRONTEND_IMAGE="${ECR_REGISTRY}/${{ env.ECR_REPOSITORY_FRONTEND }}:latest"
           #
           echo "Actualizando imágenes:"
           echo "Controller: $CONTROLLER_IMAGE"
@@ -217,6 +217,6 @@ jobs:
           if git diff --staged --quiet; then
             echo "No hay cambios para commitear"
           else
-            git commit -m "🚀 Actualiza imágenes a ${{ env.IMAGE_TAG }}"
+            git commit -m "🚀 Actualiza imágenes a latest"
             git push
           fi
