@@ -182,17 +182,17 @@ jobs:
           # Obtener las imágenes construidas
           CONTROLLER_IMAGE="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_SCALER }}:${{ github.sha }}"
           FRONTEND_IMAGE="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_FRONTEND }}:${{ github.sha }}"
-          
+          #
           echo "Actualizando imágenes:"
           echo "Controller: $CONTROLLER_IMAGE"
           echo "Frontend: $FRONTEND_IMAGE"
-          
+          #
           # Actualizar imagen del controlador
           yq e -i '.spec.template.spec.containers[0].image = "'$CONTROLLER_IMAGE'"' controller/deployment.yaml
-          
+          #
           # Actualizar imagen del frontend
           yq e -i '.spec.template.spec.containers[0].image = "'$FRONTEND_IMAGE'"' frontend/deployment.yaml
-          
+          #
           # Verificar cambios
           echo "=== Controller deployment ==="
           grep -A 2 -B 2 "image:" controller/deployment.yaml
