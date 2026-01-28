@@ -10,6 +10,7 @@ permissions:
   contents: write
   id-token: write
   packages: write
+  security-events: write
 
 env:
   AWS_REGION: us-east-1
@@ -131,7 +132,7 @@ jobs:
         uses: aquasecurity/trivy-action@master
         continue-on-error: true
         with:
-          image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_SCALER }}:${{ env.IMAGE_TAG }}
+          image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_SCALER }}:${{ github.sha }}
           format: sarif
           output: trivy-controller-results.sarif
 
@@ -139,19 +140,19 @@ jobs:
         uses: aquasecurity/trivy-action@master
         continue-on-error: true
         with:
-          image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_FRONTEND }}:${{ env.IMAGE_TAG }}
+          image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_FRONTEND }}:${{ github.sha }}
           format: sarif
           output: trivy-frontend-results.sarif
 
       - name: Upload Trivy scan results
         uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        if: always() && hashFiles('trivy-controller-results.sarif') != ''
         with:
           sarif_file: trivy-controller-results.sarif
 
       - name: Upload Trivy scan results frontend
         uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        if: always() && hashFiles('trivy-frontend-results.sarif') != ''
         with:
           sarif_file: trivy-frontend-results.sarif
 
