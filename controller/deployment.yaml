@@ -122,3 +122,4 @@ subjects:
 - kind: ServiceAccount
   name: scaler-sa
   namespace: auto-shutdown
+  
