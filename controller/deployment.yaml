@@ -26,7 +26,7 @@ spec:
         fsGroup: 1001
       containers:
         - name: scaler
-          image: /namespace-scaler:1a719e540ddcf28356624bcdab5f42a890dae1d7
+          image: /namespace-scaler:ead21a0f94f470ad6299c2774767ad1ea9ec124f
           ports:
             - containerPort: 8080
               name: http-metrics
@@ -87,7 +87,7 @@ spec:
   template:
     spec:
       containers:
-        - image: "/namespace-scaler:1a719e540ddcf28356624bcdab5f42a890dae1d7"
+        - image: "/namespace-scaler:ead21a0f94f470ad6299c2774767ad1ea9ec124f"
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -98,7 +98,7 @@ spec:
   template:
     spec:
       containers:
-        - image: "/namespace-scaler:1a719e540ddcf28356624bcdab5f42a890dae1d7"
+        - image: "/namespace-scaler:ead21a0f94f470ad6299c2774767ad1ea9ec124f"
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -118,7 +118,7 @@ spec:
   template:
     spec:
       containers:
-        - image: "/namespace-scaler:1a719e540ddcf28356624bcdab5f42a890dae1d7"
+        - image: "/namespace-scaler:ead21a0f94f470ad6299c2774767ad1ea9ec124f"
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -136,4 +136,4 @@ spec:
   template:
     spec:
       containers:
-        - image: "/namespace-scaler:1a719e540ddcf28356624bcdab5f42a890dae1d7"
+        - image: "/namespace-scaler:ead21a0f94f470ad6299c2774767ad1ea9ec124f"
