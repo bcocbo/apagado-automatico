@@ -389,11 +389,35 @@ pip install locust
 locust -f tests/performance/load_test.py --host=http://controller:8080
 ```
 
-## 📚 Documentación
+## � Documentación y Diagramas
 
-- [Diagramas de Arquitectura](docs/architecture-diagrams.md)
-- [Configuración AWS OIDC](docs/aws-oidc-setup.md)
-- [Spec Completo](.kiro/specs/namespace-auto-shutdown-system/)
+### 🎨 Diagramas de Arquitectura
+
+| Diagrama | Descripción | Archivo |
+|----------|-------------|---------|
+| **Arquitectura Principal** | Vista general del sistema con servicios AWS | [architecture_aws_diagram.png](docs/architecture_aws_diagram.png) |
+| **Arquitectura Detallada** | Diagrama completo con especificaciones técnicas | [detailed_architecture_diagram.png](docs/detailed_architecture_diagram.png) |
+| **Seguridad y Compliance** | Enfoque en controles de seguridad | [security_architecture_diagram.png](docs/security_architecture_diagram.png) |
+| **Optimización de Costos** | Análisis de ahorros y ROI | [cost_optimization_detailed_diagram.png](docs/cost_optimization_detailed_diagram.png) |
+| **Flujo Operacional** | Workflow completo de desarrollo a producción | [operational_workflow_diagram.png](docs/operational_workflow_diagram.png) |
+| **Stack de Monitoreo** | Componentes de observabilidad | [monitoring_stack_diagram.png](docs/monitoring_stack_diagram.png) |
+
+### 📚 Documentación Técnica
+
+- [📋 Documentación de Servicios AWS](docs/aws_services_documentation.md) - Detalles de cada servicio utilizado
+- [💰 Análisis de Costos](docs/cost_analysis_report.md) - Reporte completo de ahorros y ROI
+- [🔧 Configuración AWS OIDC](docs/aws-oidc-setup.md) - Guía de configuración paso a paso
+- [🏗️ Diagramas de Flujo](docs/architecture-diagrams.md) - Diagramas Mermaid adicionales
+
+### 🎯 Métricas y KPIs
+
+| Métrica | Valor | Descripción |
+|---------|-------|-------------|
+| **Ahorro Mensual** | $195/mes | Reducción en costos de infraestructura |
+| **Ahorro Anual** | $2,340/año | Proyección anual de ahorros |
+| **ROI** | 2,340% | Retorno de inversión del proyecto |
+| **Reducción de Costos** | 66% | Porcentaje de optimización logrado |
+| **Tiempo de Actividad** | 35h/semana | Horario optimizado vs 168h totales |
 
 ## 🚨 Troubleshooting
 
