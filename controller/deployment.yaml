@@ -11,7 +11,7 @@ spec:
   template:
     spec:
       containers:
-        - image: 226633502530.dkr.ecr.us-east-1.amazonaws.com/namespace-scaler:447a078e618715ecd4932452f20fb1e8f6bc570a
+        - image: 226633502530.dkr.ecr.us-east-1.amazonaws.com/namespace-scaler:latest
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -41,7 +41,7 @@ spec:
         fsGroup: 1001
       containers:
         - name: scaler
-          image: 226633502530.dkr.ecr.us-east-1.amazonaws.com/namespace-scaler:447a078e618715ecd4932452f20fb1e8f6bc570a
+          image: 226633502530.dkr.ecr.us-east-1.amazonaws.com/namespace-scaler:latest
           ports:
             - containerPort: 8080
               name: http-metrics
@@ -102,7 +102,7 @@ spec:
   template:
     spec:
       containers:
-        - image: 226633502530.dkr.ecr.us-east-1.amazonaws.com/namespace-scaler:447a078e618715ecd4932452f20fb1e8f6bc570a
+        - image: 226633502530.dkr.ecr.us-east-1.amazonaws.com/namespace-scaler:latest
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -113,7 +113,7 @@ spec:
   template:
     spec:
       containers:
-        - image: 226633502530.dkr.ecr.us-east-1.amazonaws.com/namespace-scaler:447a078e618715ecd4932452f20fb1e8f6bc570a
+        - image: 226633502530.dkr.ecr.us-east-1.amazonaws.com/namespace-scaler:latest
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -133,7 +133,7 @@ spec:
   template:
     spec:
       containers:
-        - image: 226633502530.dkr.ecr.us-east-1.amazonaws.com/namespace-scaler:447a078e618715ecd4932452f20fb1e8f6bc570a
+        - image: 226633502530.dkr.ecr.us-east-1.amazonaws.com/namespace-scaler:latest
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -151,4 +151,4 @@ spec:
   template:
     spec:
       containers:
-        - image: 226633502530.dkr.ecr.us-east-1.amazonaws.com/namespace-scaler:447a078e618715ecd4932452f20fb1e8f6bc570a
+        - image: 226633502530.dkr.ecr.us-east-1.amazonaws.com/namespace-scaler:latest
