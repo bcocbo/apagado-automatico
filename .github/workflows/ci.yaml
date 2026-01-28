@@ -177,22 +177,34 @@ jobs:
           chmod +x yq
           sudo mv yq /usr/local/bin/
 
+      - name: Configurar AWS credentials con OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-session-name: GitHubActions-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login a ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
       - name: Actualizar tags en manifests
         run: |
-          # Obtener las imágenes construidas
-          CONTROLLER_IMAGE="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_SCALER }}:${{ github.sha }}"
-          FRONTEND_IMAGE="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_FRONTEND }}:${{ github.sha }}"
-          #
+          # Construir las URLs de las imágenes usando el registry ECR conocido
+          ECR_REGISTRY="${{ steps.login-ecr.outputs.registry }}"
+          CONTROLLER_IMAGE="${ECR_REGISTRY}/${{ env.ECR_REPOSITORY_SCALER }}:${{ github.sha }}"
+          FRONTEND_IMAGE="${ECR_REGISTRY}/${{ env.ECR_REPOSITORY_FRONTEND }}:${{ github.sha }}"
+          
           echo "Actualizando imágenes:"
           echo "Controller: $CONTROLLER_IMAGE"
           echo "Frontend: $FRONTEND_IMAGE"
-          #
+          
           # Actualizar imagen del controlador
           yq e -i '.spec.template.spec.containers[0].image = "'$CONTROLLER_IMAGE'"' controller/deployment.yaml
-          #
+          
           # Actualizar imagen del frontend
           yq e -i '.spec.template.spec.containers[0].image = "'$FRONTEND_IMAGE'"' frontend/deployment.yaml
-          #
+          
           # Verificar cambios
           echo "=== Controller deployment ==="
           grep -A 2 -B 2 "image:" controller/deployment.yaml
