@@ -7,7 +7,11 @@ metadata:
     name: encendido-eks
     app.kubernetes.io/name: encendido-eks
     app.kubernetes.io/component: namespace-encendido-eks
-
+spec:
+  template:
+    spec:
+      containers:
+        - image: /namespace-scaler:55f48f60c32447856d28935b66c14fd7214eb10c
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -36,48 +40,47 @@ spec:
         runAsUser: 1001
         fsGroup: 1001
       containers:
-      - name: scaler
-        image: 226633502530.dkr.ecr.us-east-1.amazonaws.com/namespace-scaler:latest
-        ports:
-        - containerPort: 8080
-          name: http-metrics
-        - containerPort: 8081
-          name: http-health
-        env:
-        - name: AWS_REGION
-          value: us-east-1
-        - name: DYNAMODB_TABLE
-          value: NamespaceSchedules
-        - name: TIMEZONE
-          value: America/Bogota
-        - name: SYSTEM_NAMESPACES
-          value: kube-system,kube-public,kube-node-lease,default,argocd,kyverno,encendido-eks,karpenter
-        - name: LOG_LEVEL
-          value: INFO
-        resources:
-          requests:
-            memory: "128Mi"
-            cpu: "100m"
-          limits:
-            memory: "512Mi"
-            cpu: "500m"
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 8081
-          initialDelaySeconds: 30
-          periodSeconds: 10
-          timeoutSeconds: 5
-          failureThreshold: 3
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: 8081
-          initialDelaySeconds: 5
-          periodSeconds: 5
-          timeoutSeconds: 3
-          failureThreshold: 3
-
+        - name: scaler
+          image: /namespace-scaler:55f48f60c32447856d28935b66c14fd7214eb10c
+          ports:
+            - containerPort: 8080
+              name: http-metrics
+            - containerPort: 8081
+              name: http-health
+          env:
+            - name: AWS_REGION
+              value: us-east-1
+            - name: DYNAMODB_TABLE
+              value: NamespaceSchedules
+            - name: TIMEZONE
+              value: America/Bogota
+            - name: SYSTEM_NAMESPACES
+              value: kube-system,kube-public,kube-node-lease,default,argocd,kyverno,encendido-eks,karpenter
+            - name: LOG_LEVEL
+              value: INFO
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8081
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
 ---
 apiVersion: v1
 kind: Service
@@ -90,36 +93,47 @@ spec:
   selector:
     app: namespace-scaler
   ports:
-  - name: metrics
-    port: 8080
-    targetPort: 8080
-  - name: health
-    port: 8081
-    targetPort: 8081
-
+    - name: metrics
+      port: 8080
+      targetPort: 8080
+    - name: health
+      port: 8081
+      targetPort: 8081
+  template:
+    spec:
+      containers:
+        - image: /namespace-scaler:55f48f60c32447856d28935b66c14fd7214eb10c
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: scaler-sa
   namespace: encendido-eks
-
+spec:
+  template:
+    spec:
+      containers:
+        - image: /namespace-scaler:55f48f60c32447856d28935b66c14fd7214eb10c
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: namespace-scaler-role
 rules:
-- apiGroups: [""]
-  resources: ["namespaces"]
-  verbs: ["get", "list"]
-- apiGroups: ["apps"]
-  resources: ["deployments"]
-  verbs: ["get", "list", "patch", "update"]
-- apiGroups: [""]
-  resources: ["events"]
-  verbs: ["create"]
-
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create"]
+spec:
+  template:
+    spec:
+      containers:
+        - image: /namespace-scaler:55f48f60c32447856d28935b66c14fd7214eb10c
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -130,6 +144,11 @@ roleRef:
   kind: ClusterRole
   name: namespace-scaler-role
 subjects:
-- kind: ServiceAccount
-  name: scaler-sa
-  namespace: encendido-eks
+  - kind: ServiceAccount
+    name: scaler-sa
+    namespace: encendido-eks
+spec:
+  template:
+    spec:
+      containers:
+        - image: /namespace-scaler:55f48f60c32447856d28935b66c14fd7214eb10c
