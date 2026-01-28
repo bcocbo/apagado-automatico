@@ -60,7 +60,7 @@ function App() {
       <CssBaseline />
       <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
         <Typography variant="h3" component="h1" gutterBottom>
-          🎛️ Namespace Auto-Shutdown
+          🎛️ Namespace Encendido EKS
         </Typography>
         
         <Typography variant="subtitle1" color="text.secondary" gutterBottom>

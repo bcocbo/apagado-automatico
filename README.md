@@ -50,7 +50,7 @@ graph TB
     end
     
     subgraph "Kubernetes Cluster"
-        subgraph "Auto-Shutdown Namespace"
+        subgraph "Encendido EKS Namespace"
             Controller[🎛️ Python Controller<br/>• Scaling logic<br/>• Schedule processing<br/>• Health monitoring]
             Frontend[🌐 React Frontend<br/>• Schedule management<br/>• Dashboard UI<br/>• Real-time updates]
         end
@@ -425,8 +425,8 @@ locust -f tests/performance/load_test.py --host=http://controller:8080
 
 **Controller no inicia:**
 ```bash
-kubectl logs -n auto-shutdown deployment/namespace-scaler
-kubectl describe pod -n auto-shutdown -l app=namespace-scaler
+kubectl logs -n encendido-eks deployment/namespace-scaler
+kubectl describe pod -n encendido-eks -l app=namespace-scaler
 ```
 
 **GitHub Actions falla:**
@@ -443,10 +443,10 @@ kubectl describe pod -n auto-shutdown -l app=namespace-scaler
 
 ```bash
 # Ver logs en tiempo real
-kubectl logs -f -n auto-shutdown deployment/namespace-scaler
+kubectl logs -f -n encendido-eks deployment/namespace-scaler
 
 # Filtrar por nivel de error
-kubectl logs -n auto-shutdown deployment/namespace-scaler | jq 'select(.level=="error")'
+kubectl logs -n encendido-eks deployment/namespace-scaler | jq 'select(.level=="error")'
 ```
 
 ## 🤝 Contribuir

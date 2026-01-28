@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: namespace-frontend
-  namespace: auto-shutdown
+  namespace: encendido-eks
   labels:
     app: namespace-frontend
 spec:
@@ -25,7 +25,7 @@ spec:
         fsGroup: 1001
       containers:
         - name: frontend
-          image: /namespace-frontend:1a719e540ddcf28356624bcdab5f42a890dae1d7
+          image: 226633502530.dkr.ecr.us-east-1.amazonaws.com/namespace-frontend:latest
           ports:
             - containerPort: 8080
               name: http
@@ -57,7 +57,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: namespace-frontend-service
-  namespace: auto-shutdown
+  namespace: encendido-eks
   labels:
     app: namespace-frontend
 spec:
@@ -68,16 +68,12 @@ spec:
       port: 8080
       targetPort: 8080
   type: ClusterIP
-  template:
-    spec:
-      containers:
-        - image: /namespace-frontend:1a719e540ddcf28356624bcdab5f42a890dae1d7
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: namespace-frontend-ingress
-  namespace: auto-shutdown
+  namespace: encendido-eks
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
@@ -93,7 +89,3 @@ spec:
                 name: namespace-frontend-service
                 port:
                   number: 8080
-  template:
-    spec:
-      containers:
-        - image: /namespace-frontend:1a719e540ddcf28356624bcdab5f42a890dae1d7

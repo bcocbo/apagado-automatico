@@ -66,8 +66,8 @@ def create_detailed_architecture_diagram():
         # Kubernetes Cluster
         with Cluster("☸️ Kubernetes Cluster (EKS/Self-managed)"):
             
-            # Auto-shutdown Namespace
-            with Cluster("🎛️ auto-shutdown Namespace"):
+            # Encendido EKS Namespace
+            with Cluster("🎛️ encendido-eks Namespace"):
                 # RBAC
                 service_account = ServiceAccount("scaler-sa")
                 cluster_role = ClusterRole("namespace-scaler-role\nnamespaces: get,list\ndeployments: get,list,patch,update\nevents: create")

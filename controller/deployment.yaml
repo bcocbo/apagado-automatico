@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: namespace-scaler
-  namespace: auto-shutdown
+  namespace: encendido-eks
   labels:
     app: namespace-scaler
 spec:
@@ -40,7 +40,7 @@ spec:
             - name: TIMEZONE
               value: America/Bogota
             - name: SYSTEM_NAMESPACES
-              value: kube-system,kube-public,kube-node-lease,default,argocd,kyverno,auto-shutdown,karpenter
+              value: kube-system,kube-public,kube-node-lease,default,argocd,kyverno,encendido-eks,karpenter
             - name: LOG_LEVEL
               value: INFO
           resources:
@@ -71,7 +71,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: namespace-scaler-service
-  namespace: auto-shutdown
+  namespace: encendido-eks
   labels:
     app: namespace-scaler
 spec:
@@ -93,7 +93,7 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: scaler-sa
-  namespace: auto-shutdown
+  namespace: encendido-eks
 spec:
   template:
     spec:
@@ -131,7 +131,7 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: scaler-sa
-    namespace: auto-shutdown
+    namespace: encendido-eks
 spec:
   template:
     spec:

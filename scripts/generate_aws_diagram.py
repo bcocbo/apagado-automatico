@@ -48,7 +48,7 @@ def create_namespace_autoshutdown_diagram():
         
         # Kubernetes Cluster
         with Cluster("Kubernetes Cluster"):
-            with Cluster("Auto-Shutdown Namespace"):
+            with Cluster("Encendido EKS Namespace"):
                 controller_sa = ServiceAccount("Service Account")
                 controller_deploy = Deployment("Controller\nDeployment")
                 controller_svc = Service("Controller\nService")

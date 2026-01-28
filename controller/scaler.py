@@ -55,7 +55,7 @@ controller_errors = Counter(
 dynamodb = boto3.resource('dynamodb')
 table = dynamodb.Table(os.environ.get('DYNAMODB_TABLE', 'NamespaceSchedules'))
 tz = pytz.timezone(os.environ.get('TIMEZONE', 'UTC'))
-system_ns = set(os.environ.get('SYSTEM_NAMESPACES', 'kube-system,kube-public,kube-node-lease,default,argocd,kyverno,auto-shutdown,karpenter').split(','))
+system_ns = set(os.environ.get('SYSTEM_NAMESPACES', 'kube-system,kube-public,kube-node-lease,default,argocd,kyverno,encendido-eks,karpenter').split(','))
 
 class CircuitBreaker:
     def __init__(self, failure_threshold=5, timeout=60):
