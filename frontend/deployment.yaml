@@ -25,7 +25,7 @@ spec:
         fsGroup: 1001
       containers:
         - name: frontend
-          image: 226633502530.dkr.ecr.us-east-1.amazonaws.com/namespace-frontend:main-e425594
+          image: /namespace-frontend:3fb81d7a82ade9a58cb93cddfd56f9b55b4821e8
           ports:
             - containerPort: 8080
               name: http
@@ -71,7 +71,7 @@ spec:
   template:
     spec:
       containers:
-        - image: /namespace-frontend:e42559498b080598d8a898ee7fcef617c48a62ba
+        - image: /namespace-frontend:3fb81d7a82ade9a58cb93cddfd56f9b55b4821e8
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -96,4 +96,4 @@ spec:
   template:
     spec:
       containers:
-        - image: /namespace-frontend:e42559498b080598d8a898ee7fcef617c48a62ba
+        - image: /namespace-frontend:3fb81d7a82ade9a58cb93cddfd56f9b55b4821e8
