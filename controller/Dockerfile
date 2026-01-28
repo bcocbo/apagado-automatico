@@ -17,7 +17,7 @@ WORKDIR /app
 
 # Copiar requirements y instalar dependencias Python
 COPY requirements.txt .
-RUN pip install --user --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Etapa de producción
 FROM python:3.11-slim
@@ -34,11 +34,9 @@ RUN apt-get update && apt-get install -y \
 # Copiar kubectl desde builder
 COPY --from=builder /usr/local/bin/kubectl /usr/local/bin/kubectl
 
-# Copiar dependencias Python instaladas
-COPY --from=builder /root/.local /home/appuser/.local
-
-# Configurar PATH para el usuario
-ENV PATH=/home/appuser/.local/bin:$PATH
+# Copiar dependencias Python instaladas desde el builder
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
 
 WORKDIR /app
 
