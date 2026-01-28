@@ -58,8 +58,13 @@ jobs:
 
       - name: Validar manifests de Kubernetes
         run: |
-          find . -name "*.yaml" -path "*/k8s/*" -o -path "*/argocd/*" \
-            -o -path "*/controller/*" | xargs kubeval
+          # Validar solo manifests YAML de Kubernetes, excluir Dockerfiles y ArgoCD CRDs
+          find . -name "*.yaml" -type f \
+            -not -path "*/argocd/*" \
+            -not -path "*/.git/*" \
+            -not -path "*/.github/*" \
+            -not -name "Dockerfile*" \
+            | xargs -r kubeval --ignore-missing-schemas
 
   build-and-push-images:
     runs-on: ubuntu-latest
