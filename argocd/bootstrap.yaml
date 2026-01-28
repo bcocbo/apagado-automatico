@@ -24,7 +24,7 @@ spec:
     path: controller
   destination:
     server: https://kubernetes.default.svc
-    namespace: auto-shutdown
+    namespace: encendido-eks
   syncPolicy:
     automated:
       prune: false
@@ -44,7 +44,7 @@ spec:
     path: frontend
   destination:
     server: https://kubernetes.default.svc
-    namespace: auto-shutdown
+    namespace: encendido-eks
   syncPolicy:
     automated:
       prune: false
@@ -64,6 +64,7 @@ spec:
     path: policies
   destination:
     server: https://kubernetes.default.svc
+    namespace: default
   syncPolicy:
     automated:
       prune: false
