@@ -3,18 +3,23 @@ extends: relaxed
 rules:
   line-length:
     max: 120
-    level: warning  
+    level: warning
+
   indentation:
     spaces: 2
     indent-sequences: true
-    check-multi-line-strings: false  
+    check-multi-line-strings: false
+
   truthy:
     allowed-values: ['true', 'false', 'yes', 'no']
-    check-keys: false  
+    check-keys: false
+
   comments:
-    min-spaces-from-content: 1  
+    min-spaces-from-content: 1
+
   document-start:
-    present: false  
+    present: false
+
   empty-lines:
     max: 2
     max-start: 0
