@@ -26,7 +26,7 @@ spec:
         fsGroup: 1001
       containers:
         - name: scaler
-          image: 226633502530.dkr.ecr.us-east-1.amazonaws.com/namespace-scaler:latest
+          image: /namespace-scaler:1a719e540ddcf28356624bcdab5f42a890dae1d7
           ports:
             - containerPort: 8080
               name: http-metrics
@@ -87,7 +87,7 @@ spec:
   template:
     spec:
       containers:
-        - image: ""
+        - image: "/namespace-scaler:1a719e540ddcf28356624bcdab5f42a890dae1d7"
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -98,7 +98,7 @@ spec:
   template:
     spec:
       containers:
-        - image: ""
+        - image: "/namespace-scaler:1a719e540ddcf28356624bcdab5f42a890dae1d7"
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -118,7 +118,7 @@ spec:
   template:
     spec:
       containers:
-        - image: ""
+        - image: "/namespace-scaler:1a719e540ddcf28356624bcdab5f42a890dae1d7"
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -136,4 +136,4 @@ spec:
   template:
     spec:
       containers:
-        - image: ""
+        - image: "/namespace-scaler:1a719e540ddcf28356624bcdab5f42a890dae1d7"

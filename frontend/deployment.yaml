@@ -24,35 +24,34 @@ spec:
         runAsUser: 1001
         fsGroup: 1001
       containers:
-      - name: frontend
-        image: 226633502530.dkr.ecr.us-east-1.amazonaws.com/namespace-frontend:latest
-        ports:
-        - containerPort: 8080
-          name: http
-        resources:
-          requests:
-            memory: "64Mi"
-            cpu: "50m"
-          limits:
-            memory: "256Mi"
-            cpu: "200m"
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 8080
-          initialDelaySeconds: 30
-          periodSeconds: 10
-          timeoutSeconds: 5
-          failureThreshold: 3
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: 8080
-          initialDelaySeconds: 5
-          periodSeconds: 5
-          timeoutSeconds: 3
-          failureThreshold: 3
-
+        - name: frontend
+          image: /namespace-frontend:1a719e540ddcf28356624bcdab5f42a890dae1d7
+          ports:
+            - containerPort: 8080
+              name: http
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
 ---
 apiVersion: v1
 kind: Service
@@ -65,11 +64,14 @@ spec:
   selector:
     app: namespace-frontend
   ports:
-  - name: http
-    port: 8080
-    targetPort: 8080
+    - name: http
+      port: 8080
+      targetPort: 8080
   type: ClusterIP
-
+  template:
+    spec:
+      containers:
+        - image: /namespace-frontend:1a719e540ddcf28356624bcdab5f42a890dae1d7
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -81,13 +83,17 @@ metadata:
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
 spec:
   rules:
-  - host: namespace-frontend.local
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: namespace-frontend-service
-            port:
-              number: 8080
+    - host: namespace-frontend.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: namespace-frontend-service
+                port:
+                  number: 8080
+  template:
+    spec:
+      containers:
+        - image: /namespace-frontend:1a719e540ddcf28356624bcdab5f42a890dae1d7
