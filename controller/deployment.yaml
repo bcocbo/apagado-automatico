@@ -41,7 +41,7 @@ spec:
         fsGroup: 1001
       containers:
         - name: scaler
-          image: /namespace-scaler:e42559498b080598d8a898ee7fcef617c48a62ba
+          image: 226633502530.dkr.ecr.us-east-1.amazonaws.com/namespace-scaler:main-e425594
           ports:
             - containerPort: 8080
               name: http-metrics
