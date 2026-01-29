@@ -52,7 +52,8 @@ controller_errors = Counter(
 )
 
 # Configuración
-dynamodb = boto3.resource('dynamodb')
+aws_region = os.environ.get('AWS_REGION', 'us-east-1')
+dynamodb = boto3.resource('dynamodb', region_name=aws_region)
 table = dynamodb.Table(os.environ.get('DYNAMODB_TABLE', 'NamespaceSchedules'))
 tz = pytz.timezone(os.environ.get('TIMEZONE', 'UTC'))
 system_ns = set(os.environ.get('SYSTEM_NAMESPACES', 'kube-system,kube-public,kube-node-lease,default,argocd,kyverno,encendido-eks,karpenter').split(','))
