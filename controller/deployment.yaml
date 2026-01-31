@@ -7,11 +7,61 @@ metadata:
     name: encendido-eks
     app.kubernetes.io/name: encendido-eks
     app.kubernetes.io/component: namespace-encendido-eks
-spec:
-  template:
-    spec:
-      containers:
-        - image: 226633502530.dkr.ecr.us-east-1.amazonaws.com/namespace-scaler:latest
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: scaler-sa
+  namespace: encendido-eks
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::226633502530:role/NamespaceControllerRole
+  labels:
+    app: namespace-scaler
+    component: serviceaccount
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: namespace-scaler-role
+  labels:
+    app: namespace-scaler
+    component: rbac
+rules:
+  # Permisos para leer namespaces
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch"]
+  
+  # Permisos para gestionar deployments
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  
+  # Permisos para crear eventos
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  
+  # Permisos para leer pods (para health checks)
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: namespace-scaler-binding
+  labels:
+    app: namespace-scaler
+    component: rbac
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: namespace-scaler-role
+subjects:
+  - kind: ServiceAccount
+    name: scaler-sa
+    namespace: encendido-eks
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -99,56 +149,3 @@ spec:
     - name: health
       port: 8081
       targetPort: 8081
-  template:
-    spec:
-      containers:
-        - image: 226633502530.dkr.ecr.us-east-1.amazonaws.com/namespace-scaler:latest
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: scaler-sa
-  namespace: encendido-eks
-spec:
-  template:
-    spec:
-      containers:
-        - image: 226633502530.dkr.ecr.us-east-1.amazonaws.com/namespace-scaler:latest
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: namespace-scaler-role
-rules:
-  - apiGroups: [""]
-    resources: ["namespaces"]
-    verbs: ["get", "list"]
-  - apiGroups: ["apps"]
-    resources: ["deployments"]
-    verbs: ["get", "list", "patch", "update"]
-  - apiGroups: [""]
-    resources: ["events"]
-    verbs: ["create"]
-spec:
-  template:
-    spec:
-      containers:
-        - image: 226633502530.dkr.ecr.us-east-1.amazonaws.com/namespace-scaler:latest
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: namespace-scaler-binding
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: namespace-scaler-role
-subjects:
-  - kind: ServiceAccount
-    name: scaler-sa
-    namespace: encendido-eks
-spec:
-  template:
-    spec:
-      containers:
-        - image: 226633502530.dkr.ecr.us-east-1.amazonaws.com/namespace-scaler:latest

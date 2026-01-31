@@ -1,0 +1,1 @@
+# Property-based tests for namespace auto-shutdown system

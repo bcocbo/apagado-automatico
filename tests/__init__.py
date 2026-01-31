@@ -1,0 +1,1 @@
+# Test package for namespace auto-shutdown system

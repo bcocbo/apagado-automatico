@@ -1,25 +1,72 @@
 {
   "name": "namespace-frontend",
   "version": "1.0.0",
-  "description": "Frontend para sistema de apagado automático de namespaces",
+  "description": "Frontend for namespace auto-shutdown system",
   "main": "src/index.js",
+  "homepage": ".",
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
-    "eject": "react-scripts eject"
+    "test:coverage": "react-scripts test --coverage --watchAll=false",
+    "eject": "react-scripts eject",
+    "lint": "eslint src/ --ext .js,.jsx,.ts,.tsx",
+    "lint:fix": "eslint src/ --ext .js,.jsx,.ts,.tsx --fix",
+    "format": "prettier --write src/**/*.{js,jsx,ts,tsx,json,css,md}",
+    "analyze": "npm run build && npx bundle-analyzer build/static/js/*.js",
+    "serve": "serve -s build -l 3000"
   },
   "dependencies": {
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-scripts": "5.0.1",
-    "@mui/material": "^5.15.0",
-    "@mui/icons-material": "^5.15.0",
-    "@emotion/react": "^11.11.0",
+    "@mui/material": "^5.15.10",
+    "@mui/icons-material": "^5.15.10",
+    "@mui/lab": "^5.0.0-alpha.162",
+    "@emotion/react": "^11.11.3",
     "@emotion/styled": "^11.11.0",
-    "axios": "^1.6.0",
-    "date-fns": "^3.0.0",
-    "react-query": "^3.39.0"
+    "axios": "^1.6.7",
+    "date-fns": "^3.3.1",
+    "@tanstack/react-query": "^5.20.1",
+    "react-router-dom": "^6.21.3",
+    "react-hook-form": "^7.49.3",
+    "@hookform/resolvers": "^3.3.4",
+    "yup": "^1.4.0",
+    "recharts": "^2.12.0",
+    "react-error-boundary": "^4.0.12",
+    "web-vitals": "^3.5.2",
+    "workbox-webpack-plugin": "^7.0.0",
+    "socket.io-client": "^4.7.4",
+    "react-use-websocket": "^4.8.1",
+    "react-virtualized": "^9.22.5",
+    "@mui/x-data-grid": "^6.19.4",
+    "@mui/x-date-pickers": "^6.19.4",
+    "dayjs": "^1.11.10",
+    "react-helmet-async": "^2.0.4",
+    "react-intersection-observer": "^9.8.1",
+    "react-window": "^1.8.8"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.4.2",
+    "@testing-library/react": "^14.2.1",
+    "@testing-library/user-event": "^14.5.2",
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.11.17",
+    "@types/react": "^18.2.55",
+    "@types/react-dom": "^18.2.19",
+    "@types/react-virtualized": "^9.21.29",
+    "@types/react-window": "^1.8.8",
+    "typescript": "^5.3.3",
+    "eslint": "^8.56.0",
+    "eslint-config-react-app": "^7.0.1",
+    "prettier": "^3.2.5",
+    "serve": "^14.2.1"
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ]
   },
   "browserslist": {
     "production": [
@@ -32,5 +79,21 @@
       "last 1 firefox version",
       "last 1 safari version"
     ]
+  },
+  "jest": {
+    "collectCoverageFrom": [
+      "src/**/*.{js,jsx,ts,tsx}",
+      "!src/index.js",
+      "!src/reportWebVitals.js",
+      "!src/**/*.d.ts"
+    ],
+    "coverageThreshold": {
+      "global": {
+        "branches": 70,
+        "functions": 70,
+        "lines": 70,
+        "statements": 70
+      }
+    }
   }
 }

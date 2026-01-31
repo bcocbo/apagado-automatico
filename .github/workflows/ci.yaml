@@ -1,4 +1,4 @@
-name: CI/CD para Apagado Automático
+name: Namespace Auto-Shutdown System CI/CD
 
 on:
   push:
@@ -11,39 +11,158 @@ permissions:
   id-token: write
   packages: write
   security-events: write
+  actions: read
 
 env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY_SCALER: namespace-scaler
   ECR_REPOSITORY_FRONTEND: namespace-frontend
   IMAGE_TAG: ${{ github.sha }}
+  PYTHON_VERSION: '3.11'
+  NODE_VERSION: '18'
 
 jobs:
-  validate-kyverno:
+  security-scan:
+    name: Security Analysis
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout código
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Instalar Kyverno CLI
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python, javascript
+          config-file: ./.github/codeql/codeql-config.yml
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:python,javascript"
+          upload: true
+
+      - name: Run Semgrep Security Analysis
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: >-
+            p/security-audit
+            p/secrets
+            p/owasp-top-ten
+            p/kubernetes
+          generateSarif: "1"
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+
+      - name: Upload Semgrep results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+      - name: Run Bandit Security Linter for Python
+        run: |
+          pip install bandit[toml]
+          bandit -r controller/ -f json -o bandit-report.json || true
+          bandit -r controller/ -f sarif -o bandit-report.sarif || true
+
+      - name: Upload Bandit results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: bandit-report.sarif
+          category: bandit
+
+      - name: Run ESLint Security Analysis for JavaScript
+        run: |
+          cd frontend
+          npm install eslint-plugin-security --save-dev
+          npx eslint . --ext .js,.jsx,.ts,.tsx --format json --output-file ../eslint-security-report.json || true
+
+      - name: Check for security vulnerabilities in dependencies
+        run: |
+          # Python dependencies
+          pip install safety
+          safety check --json --output safety-report.json || true
+
+          # Node.js dependencies
+          cd frontend
+          npm audit --audit-level=moderate --json > ../npm-audit-report.json || true
+
+  validate-kyverno:
+    name: Validate Kyverno Policies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Kyverno CLI
         run: |
           curl -LO "https://github.com/kyverno/kyverno/releases/download/v1.12.0/kyverno-cli_v1.12.0_linux_x86_64.tar.gz"
           tar -xzf kyverno-cli_v1.12.0_linux_x86_64.tar.gz
           sudo mv kyverno /usr/local/bin/kyverno
 
-      - name: Validar políticas de Kyverno
+      - name: Validate Kyverno policies
         run: |
           kyverno version
-          # Validar sintaxis de políticas
+          # Validate policy syntax
           find policies/ -name "*.yaml" -exec kyverno validate {} \;
 
-  lint-yaml:
+  lint-and-test:
+    name: Lint and Test
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout código
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Instalar yamllint
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install yamllint pytest pytest-cov flake8 black isort
+          if [ -f controller/requirements.txt ]; then pip install -r controller/requirements.txt; fi
+
+      - name: Install Node.js dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Lint Python code
+        run: |
+          flake8 controller/ --count --select=E9,F63,F7,F82 --show-source --statistics
+          black --check controller/
+          isort --check-only controller/
+
+      - name: Lint JavaScript/TypeScript code
+        run: |
+          cd frontend
+          npm run lint
+
+      - name: Run Python tests
+        run: |
+          cd controller
+          pytest --cov=. --cov-report=xml --cov-report=term-missing
+
+      - name: Run Frontend tests
+        run: |
+          cd frontend
+          npm test -- --coverage --watchAll=false
+
+      - name: Install yamllint
         run: |
           pip install yamllint
 
@@ -51,15 +170,15 @@ jobs:
         run: |
           yamllint -d relaxed .
 
-      - name: Instalar kubeval
+      - name: Install kubeval
         run: |
           curl -LO https://github.com/instrumenta/kubeval/releases/latest/download/kubeval-linux-amd64.tar.gz
           tar xf kubeval-linux-amd64.tar.gz
           sudo mv kubeval /usr/local/bin
 
-      - name: Validar manifests de Kubernetes
+      - name: Validate Kubernetes manifests
         run: |
-          # Validar solo manifests YAML de Kubernetes, excluir Dockerfiles y ArgoCD CRDs
+          # Validate only Kubernetes YAML manifests, exclude Dockerfiles and ArgoCD CRDs
           find . -name "*.yaml" -type f \
             -not -path "*/argocd/*" \
             -not -path "*/.git/*" \
@@ -68,27 +187,42 @@ jobs:
             | xargs -r kubeval --ignore-missing-schemas
 
   build-and-push-images:
+    name: Build and Push Container Images
     runs-on: ubuntu-latest
-    needs: [validate-kyverno, lint-yaml]
+    needs: [security-scan, validate-kyverno, lint-and-test]
     outputs:
       controller-image: ${{ steps.build-scaler.outputs.image }}
       frontend-image: ${{ steps.build-frontend.outputs.image }}
+      controller-digest: ${{ steps.build-scaler.outputs.digest }}
+      frontend-digest: ${{ steps.build-frontend.outputs.digest }}
     steps:
-      - name: Checkout código
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Configurar AWS credentials con OIDC
+      - name: Configure AWS credentials with OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          role-session-name: GitHubActions-${{ github.run_id }}
+          role-session-name: GitHubActions-${{ github.run_id }}-${{ github.run_attempt }}
           aws-region: ${{ env.AWS_REGION }}
+          role-duration-seconds: 3600
+          mask-aws-account-id: false
 
-      - name: Login a ECR
+      - name: Verify AWS identity
+        run: |
+          aws sts get-caller-identity
+          echo "AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)" >> $GITHUB_ENV
+
+      - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
+        with:
+          mask-password: true
 
-      - name: Extract metadata scaler
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract metadata for controller
         id: meta-scaler
         uses: docker/metadata-action@v5
         with:
@@ -98,125 +232,319 @@ jobs:
             type=ref,event=pr
             type=sha,prefix={{branch}}-
             type=raw,value=latest,enable={{is_default_branch}}
+          labels: |
+            org.opencontainers.image.title=Namespace Controller
+            org.opencontainers.image.description=Kubernetes namespace auto-shutdown controller
+            org.opencontainers.image.vendor=Your Organization
 
-      - name: Build y push imagen controlador
+      - name: Build and push controller image
         id: build-scaler
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v5
         with:
           context: controller
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta-scaler.outputs.tags }}
           labels: ${{ steps.meta-scaler.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true
 
-      - name: Extract metadata frontend
+      - name: Extract metadata for frontend
         id: meta-frontend
         uses: docker/metadata-action@v5
         with:
           images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_FRONTEND }}
           tags: |
             type=ref,event=branch
-            type=ref,event=pr
             type=sha,prefix={{branch}}-
             type=raw,value=latest,enable={{is_default_branch}}
+          labels: |
+            org.opencontainers.image.title=Namespace Frontend
+            org.opencontainers.image.description=React frontend for namespace auto-shutdown system
+            org.opencontainers.image.vendor=Your Organization
 
-      - name: Build y push imagen frontend
+      - name: Build and push frontend image
         id: build-frontend
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v5
         with:
           context: frontend
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta-frontend.outputs.tags }}
           labels: ${{ steps.meta-frontend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true
 
-      - name: Scan imagen controlador con Trivy
-        uses: aquasecurity/trivy-action@master
-        continue-on-error: true
-        with:
-          image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_SCALER }}:${{ github.sha }}
-          format: sarif
-          output: trivy-controller-results.sarif
-
-      - name: Scan imagen frontend con Trivy
-        uses: aquasecurity/trivy-action@master
-        continue-on-error: true
-        with:
-          image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_FRONTEND }}:${{ github.sha }}
-          format: sarif
-          output: trivy-frontend-results.sarif
-
-      - name: Upload Trivy scan results
-        uses: github/codeql-action/upload-sarif@v3
-        if: always() && hashFiles('trivy-controller-results.sarif') != ''
-        with:
-          sarif_file: trivy-controller-results.sarif
-
-      - name: Upload Trivy scan results frontend
-        uses: github/codeql-action/upload-sarif@v3
-        if: always() && hashFiles('trivy-frontend-results.sarif') != ''
-        with:
-          sarif_file: trivy-frontend-results.sarif
-
-  update-manifests:
+  security-scan-images:
+    name: Security Scan Container Images
     runs-on: ubuntu-latest
     needs: build-and-push-images
-    if: github.ref == 'refs/heads/main'
+    strategy:
+      matrix:
+        image: [controller, frontend]
     steps:
-      - name: Checkout código
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials with OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-session-name: GitHubActions-${{ github.run_id }}-${{ github.run_attempt }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-duration-seconds: 1800
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set image reference
+        id: image-ref
+        run: |
+          if [ "${{ matrix.image }}" = "controller" ]; then
+            echo "image-ref=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_SCALER }}:${{ github.sha }}" >> $GITHUB_OUTPUT
+          else
+            echo "image-ref=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_FRONTEND }}:${{ github.sha }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.image-ref.outputs.image-ref }}
+          format: sarif
+          output: trivy-${{ matrix.image }}-results.sarif
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          exit-code: '0'  # Don't fail the job, let the threshold check handle it
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          scanners: 'vuln,secret,config'
+
+      - name: Run Trivy configuration scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.image-ref.outputs.image-ref }}
+          format: json
+          output: trivy-${{ matrix.image }}-config.json
+          scan-type: 'config'
+          exit-code: '0'
+
+      - name: Run Trivy secret scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.image-ref.outputs.image-ref }}
+          format: json
+          output: trivy-${{ matrix.image }}-secrets.json
+          scan-type: 'secret'
+          exit-code: '0'
+
+      - name: Parse Trivy results and check thresholds
+        id: trivy-check
+        run: |
+          # Install jq for JSON parsing
+          sudo apt-get update && sudo apt-get install -y jq
+
+          # Define security thresholds
+          CRITICAL_THRESHOLD=0
+          HIGH_THRESHOLD=5
+          MEDIUM_THRESHOLD=20
+
+          # Parse SARIF results
+          if [ -f "trivy-${{ matrix.image }}-results.sarif" ]; then
+            # Extract vulnerability counts from SARIF
+            CRITICAL_COUNT=$(jq '[.runs[].results[] | select(.level == "error")] | length' trivy-${{ matrix.image }}-results.sarif)
+            HIGH_COUNT=$(jq '[.runs[].results[] | select(.level == "warning")] | length' trivy-${{ matrix.image }}-results.sarif)
+            MEDIUM_COUNT=$(jq '[.runs[].results[] | select(.level == "note")] | length' trivy-${{ matrix.image }}-results.sarif)
+
+            echo "Security scan results for ${{ matrix.image }}:"
+            echo "Critical: $CRITICAL_COUNT (threshold: $CRITICAL_THRESHOLD)"
+            echo "High: $HIGH_COUNT (threshold: $HIGH_THRESHOLD)"
+            echo "Medium: $MEDIUM_COUNT (threshold: $MEDIUM_THRESHOLD)"
+
+            # Check thresholds
+            THRESHOLD_EXCEEDED=false
+
+            if [ "$CRITICAL_COUNT" -gt "$CRITICAL_THRESHOLD" ]; then
+              echo "❌ CRITICAL vulnerabilities exceed threshold: $CRITICAL_COUNT > $CRITICAL_THRESHOLD"
+              THRESHOLD_EXCEEDED=true
+            fi
+
+            if [ "$HIGH_COUNT" -gt "$HIGH_THRESHOLD" ]; then
+              echo "❌ HIGH vulnerabilities exceed threshold: $HIGH_COUNT > $HIGH_THRESHOLD"
+              THRESHOLD_EXCEEDED=true
+            fi
+
+            if [ "$MEDIUM_COUNT" -gt "$MEDIUM_THRESHOLD" ]; then
+              echo "⚠️ MEDIUM vulnerabilities exceed threshold: $MEDIUM_COUNT > $MEDIUM_THRESHOLD"
+              # Medium vulnerabilities are warnings, not failures
+            fi
+
+            echo "threshold-exceeded=$THRESHOLD_EXCEEDED" >> $GITHUB_OUTPUT
+            echo "critical-count=$CRITICAL_COUNT" >> $GITHUB_OUTPUT
+            echo "high-count=$HIGH_COUNT" >> $GITHUB_OUTPUT
+            echo "medium-count=$MEDIUM_COUNT" >> $GITHUB_OUTPUT
+          else
+            echo "No SARIF results found"
+            echo "threshold-exceeded=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check for secrets in container
+        run: |
+          if [ -f "trivy-${{ matrix.image }}-secrets.json" ]; then
+            SECRET_COUNT=$(jq '.Results // [] | map(.Secrets // []) | flatten | length' trivy-${{ matrix.image }}-secrets.json)
+            echo "Secrets found in ${{ matrix.image }}: $SECRET_COUNT"
+
+            if [ "$SECRET_COUNT" -gt 0 ]; then
+              echo "❌ Secrets detected in container image!"
+              jq '.Results // [] | map(.Secrets // []) | flatten | .[] | "- \(.Title): \(.Match)"' trivy-${{ matrix.image }}-secrets.json
+              echo "secrets-found=true" >> $GITHUB_OUTPUT
+            else
+              echo "✅ No secrets found in container image"
+              echo "secrets-found=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-${{ matrix.image }}-results.sarif
+          category: trivy-${{ matrix.image }}
+
+      - name: Create security summary
+        run: |
+          echo "## Security Scan Summary for ${{ matrix.image }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Severity | Count | Threshold | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Critical | ${{ steps.trivy-check.outputs.critical-count }} | 0 | $([ '${{ steps.trivy-check.outputs.critical-count }}' -gt '0' ] && echo '❌ FAIL' || echo '✅ PASS') |" >> $GITHUB_STEP_SUMMARY
+          echo "| High | ${{ steps.trivy-check.outputs.high-count }} | 5 | $([ '${{ steps.trivy-check.outputs.high-count }}' -gt '5' ] && echo '❌ FAIL' || echo '✅ PASS') |" >> $GITHUB_STEP_SUMMARY
+          echo "| Medium | ${{ steps.trivy-check.outputs.medium-count }} | 20 | $([ '${{ steps.trivy-check.outputs.medium-count }}' -gt '20' ] && echo '⚠️ WARN' || echo '✅ PASS') |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ steps.trivy-check.outputs.secrets-found }}" = "true" ]; then
+            echo "🔒 **Secrets detected in container image!**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "🔒 No secrets found in container image" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Fail job if security thresholds exceeded
+        if: steps.trivy-check.outputs.threshold-exceeded == 'true' || steps.trivy-check.outputs.secrets-found == 'true'
+        run: |
+          echo "❌ Security scan failed due to threshold violations or secrets detection"
+          echo "Please review the security findings and fix the issues before proceeding"
+          exit 1
+
+      - name: Upload security artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-scan-${{ matrix.image }}
+          path: |
+            trivy-${{ matrix.image }}-*.json
+            trivy-${{ matrix.image }}-*.sarif
+          retention-days: 30
+
+  update-manifests:
+    name: Update Kubernetes Manifests
+    runs-on: ubuntu-latest
+    needs: [build-and-push-images, security-scan-images]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - name: Checkout code
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
 
-      - name: Configurar Git
+      - name: Configure Git
         run: |
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Instalar yq
+      - name: Install yq
         run: |
           curl -sL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o yq
           chmod +x yq
           sudo mv yq /usr/local/bin/
 
-      - name: Configurar AWS credentials con OIDC
+      - name: Configure AWS credentials with OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          role-session-name: GitHubActions-${{ github.run_id }}
+          role-session-name: GitHubActions-${{ github.run_id }}-${{ github.run_attempt }}
           aws-region: ${{ env.AWS_REGION }}
+          role-duration-seconds: 1800
 
-      - name: Login a ECR
+      - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Actualizar tags en manifests
+      - name: Update image tags in manifests
         run: |
-          # Construir las URLs de las imágenes usando el registry ECR conocido
+          # Build ECR image URLs
           ECR_REGISTRY="${{ steps.login-ecr.outputs.registry }}"
           CONTROLLER_IMAGE="${ECR_REGISTRY}/${{ env.ECR_REPOSITORY_SCALER }}:latest"
           FRONTEND_IMAGE="${ECR_REGISTRY}/${{ env.ECR_REPOSITORY_FRONTEND }}:latest"
-          #
-          echo "Actualizando imágenes:"
+
+          echo "Updating images:"
           echo "Controller: $CONTROLLER_IMAGE"
           echo "Frontend: $FRONTEND_IMAGE"
-          #
-          # Actualizar imagen del controlador
-          yq e -i '.spec.template.spec.containers[0].image = "'$CONTROLLER_IMAGE'"' controller/deployment.yaml
-          #
-          # Actualizar imagen del frontend
-          yq e -i '.spec.template.spec.containers[0].image = "'$FRONTEND_IMAGE'"' frontend/deployment.yaml
-          #
-          # Verificar cambios
-          echo "=== Controller deployment ==="
-          grep -A 2 -B 2 "image:" controller/deployment.yaml
-          echo "=== Frontend deployment ==="
-          grep -A 2 -B 2 "image:" frontend/deployment.yaml
 
-      - name: Commit y push cambios
+          # Update controller image
+          if [ -f controller/deployment.yaml ]; then
+            yq e -i '.spec.template.spec.containers[0].image = "'$CONTROLLER_IMAGE'"' controller/deployment.yaml
+          fi
+
+          # Update frontend image
+          if [ -f frontend/deployment.yaml ]; then
+            yq e -i '.spec.template.spec.containers[0].image = "'$FRONTEND_IMAGE'"' frontend/deployment.yaml
+          fi
+
+          # Verify changes
+          echo "=== Controller deployment ==="
+          if [ -f controller/deployment.yaml ]; then
+            grep -A 2 -B 2 "image:" controller/deployment.yaml || echo "No controller deployment found"
+          fi
+          echo "=== Frontend deployment ==="
+          if [ -f frontend/deployment.yaml ]; then
+            grep -A 2 -B 2 "image:" frontend/deployment.yaml || echo "No frontend deployment found"
+          fi
+
+      - name: Commit and push changes
         run: |
-          git add controller/deployment.yaml frontend/deployment.yaml
+          git add -A
           if git diff --staged --quiet; then
-            echo "No hay cambios para commitear"
+            echo "No changes to commit"
           else
-            git commit -m "🚀 Actualiza imágenes a latest"
+            git commit -m "🚀 Update container images to latest
+
+            - Controller: ${{ env.ECR_REPOSITORY_SCALER }}:latest
+            - Frontend: ${{ env.ECR_REPOSITORY_FRONTEND }}:latest
+
+            Built from commit: ${{ github.sha }}"
             git push
           fi
+
+  notify-deployment:
+    name: Notify Deployment Status
+    runs-on: ubuntu-latest
+    needs: [update-manifests]
+    if: always()
+    steps:
+      - name: Deployment Success Notification
+        if: needs.update-manifests.result == 'success'
+        run: |
+          echo "✅ Deployment completed successfully!"
+          echo "Images updated and pushed to ECR"
+          echo "Kubernetes manifests updated"
+
+      - name: Deployment Failure Notification
+        if: needs.update-manifests.result == 'failure'
+        run: |
+          echo "❌ Deployment failed!"
+          echo "Check the logs for more details"
+          exit 1

@@ -1,0 +1,166 @@
+# Python project configuration
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "namespace-auto-shutdown-system"
+version = "1.0.0"
+description = "Kubernetes namespace auto-shutdown system for cost optimization"
+authors = [
+    {name = "DevOps Team", email = "devops@company.com"}
+]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.11"
+
+# Bandit security linter configuration
+[tool.bandit]
+# Paths to scan
+targets = ["controller/"]
+
+# Paths to exclude
+exclude_dirs = [
+    "tests/",
+    "build/",
+    "dist/",
+    ".venv/",
+    "venv/",
+]
+
+# Tests to skip (with justification)
+skips = [
+    # Skip these tests with valid reasons
+    # "B101",  # assert_used - we use asserts in tests only
+]
+
+# Security issue severity levels
+# LOW, MEDIUM, HIGH
+confidence = "HIGH"
+severity = "MEDIUM"
+
+# Additional Bandit plugins
+plugins = [
+    "bandit.plugins.general",
+    "bandit.plugins.crypto",
+    "bandit.plugins.injection",
+]
+
+# Custom Bandit rules
+[tool.bandit.assert_used]
+# Allow asserts in test files
+skips = ["*test*.py", "test_*.py"]
+
+[tool.bandit.hardcoded_password_string]
+# Be strict about hardcoded passwords
+word_list = [
+    "password",
+    "pass",
+    "passwd",
+    "pwd",
+    "secret",
+    "token",
+    "key",
+    "api_key",
+    "apikey",
+    "access_key",
+    "auth",
+    "credential",
+    "cred",
+]
+
+# Black code formatter configuration
+[tool.black]
+line-length = 88
+target-version = ['py311']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+# isort import sorter configuration
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+line_length = 88
+known_first_party = ["controller"]
+known_third_party = ["kubernetes", "boto3", "prometheus_client"]
+
+# pytest configuration
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--strict-markers",
+    "--strict-config",
+    "--cov=controller",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+    "--cov-report=xml",
+]
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "property: Property-based tests",
+    "security: Security tests",
+    "slow: Slow running tests",
+]
+
+# Coverage configuration
+[tool.coverage.run]
+source = ["controller"]
+omit = [
+    "*/tests/*",
+    "*/test_*",
+    "*/__pycache__/*",
+    "*/venv/*",
+    "*/.venv/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
+
+# MyPy type checking configuration
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+
+[[tool.mypy.overrides]]
+module = [
+    "kubernetes.*",
+    "boto3.*",
+    "botocore.*",
+    "prometheus_client.*",
+]
+ignore_missing_imports = true
