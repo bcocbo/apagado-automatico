@@ -20,7 +20,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install dependencies with npm ci for faster, reliable builds
-RUN npm ci --only=production --silent --no-audit --no-fund \
+RUN npm ci --silent --no-audit --no-fund \
     && npm cache clean --force
 
 # Copy source code
