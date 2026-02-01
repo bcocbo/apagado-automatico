@@ -77,6 +77,7 @@ export interface ControllerHealth {
     failure_count: number;
     is_open: boolean;
   };
+  uptime?: number;
   last_successful_operations?: Record<string, any>;
 }
 
@@ -101,19 +102,19 @@ export interface PerformanceMetrics {
   page_load_time: number;
   api_response_times: Record<string, number>;
   user_interactions: UserInteraction[];
-  errors: ErrorEvent[];
+  errors: AppErrorEvent[];
   memory_usage?: number;
   connection_status: 'online' | 'offline';
 }
 
 export interface UserInteraction {
-  type: 'click' | 'navigation' | 'form_submit' | 'search';
+  type: 'click' | 'navigation' | 'form_submit' | 'search' | 'websocket';
   element: string;
   timestamp: string;
   duration?: number;
 }
 
-export interface ErrorEvent {
+export interface AppErrorEvent {
   type: 'api_error' | 'websocket_error' | 'component_error' | 'network_error';
   message: string;
   stack?: string;

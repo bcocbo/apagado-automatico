@@ -22,7 +22,7 @@ import {
   Menu as MenuIcon,
   Dashboard as DashboardIcon,
   Schedule as ScheduleIcon,
-  Monitoring as MonitoringIcon,
+  Analytics as MonitoringIcon,
   Settings as SettingsIcon,
   Notifications as NotificationsIcon,
   WifiOff as WifiOffIcon,

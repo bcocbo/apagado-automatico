@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { PerformanceMetrics, UserInteraction, ErrorEvent } from '../types';
+import { PerformanceMetrics, UserInteraction, AppErrorEvent } from '../types';
 
 interface UsePerformanceMonitoringOptions {
   enabled?: boolean;
@@ -27,7 +27,7 @@ export const usePerformanceMonitoring = (options: UsePerformanceMonitoringOption
   const startTimeRef = useRef<number>(Date.now());
   const reportIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const interactionsRef = useRef<UserInteraction[]>([]);
-  const errorsRef = useRef<ErrorEvent[]>([]);
+  const errorsRef = useRef<AppErrorEvent[]>([]);
   const apiTimesRef = useRef<Record<string, number>>({});
 
   // Track page load time
@@ -90,14 +90,14 @@ export const usePerformanceMonitoring = (options: UsePerformanceMonitoringOption
 
   // Track errors
   const trackError = useCallback((
-    type: ErrorEvent['type'],
+    type: AppErrorEvent['type'],
     message: string,
     stack?: string,
     url?: string
   ) => {
     if (!enabled) return;
 
-    const error: ErrorEvent = {
+    const error: AppErrorEvent = {
       type,
       message,
       stack,
