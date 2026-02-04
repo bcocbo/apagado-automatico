@@ -36,9 +36,9 @@ FROM nginx:1.25-alpine as production
 # Set labels for better maintainability
 LABEL maintainer="DevOps Team" \
       version="1.0.0" \
-      description="Namespace Auto-Shutdown Frontend" \
-      org.opencontainers.image.title="Namespace Frontend" \
-      org.opencontainers.image.description="React frontend for namespace auto-shutdown system" \
+      description="Namespace Startup Scheduler Frontend" \
+      org.opencontainers.image.title="Namespace Startup Scheduler Frontend" \
+      org.opencontainers.image.description="React frontend for namespace startup scheduler system" \
       org.opencontainers.image.vendor="Your Organization" \
       org.opencontainers.image.licenses="MIT"
 

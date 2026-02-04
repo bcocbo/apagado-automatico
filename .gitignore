@@ -1,3 +1,6 @@
+# Backup directory
+oldversion/
+
 # Build and Release Folders
 bin-debug/
 bin-release/
@@ -125,3 +128,32 @@ frontend/build/
 .mypy_cache/
 .dmypy.json
 dmypy.json
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+.terraform.lock.hcl
+terraform.tfvars
+
+# Security reports
+bandit-report.json
+safety-report.json
+trivy-results.sarif
+
+# Coverage reports
+htmlcov/
+coverage.xml
+.coverage
+
+# GitHub secrets file
+github-secrets.txt
+
+# Test artifacts
+.tox/
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/

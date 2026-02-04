@@ -4,9 +4,9 @@ requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "namespace-auto-shutdown-system"
+name = "namespace-startup-scheduler"
 version = "1.0.0"
-description = "Kubernetes namespace auto-shutdown system for cost optimization"
+description = "Sistema MVP para programar el auto-encendido de namespaces en Kubernetes"
 authors = [
     {name = "DevOps Team", email = "devops@company.com"}
 ]

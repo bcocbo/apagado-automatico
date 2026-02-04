@@ -1,0 +1,28 @@
+{
+  "enabled": true,
+  "name": "Auto Documentation Sync",
+  "description": "Automatically updates documentation in README or /docs folder when source files are modified to keep documentation synchronized with code changes hacer version en ingles y español",
+  "version": "1",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [
+      "*.py",
+      "*.ts",
+      "*.tsx",
+      "*.js",
+      "*.jsx",
+      "*.yaml",
+      "*.yml",
+      "Dockerfile",
+      "requirements.txt",
+      "package.json",
+      "Makefile"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "A source file has been modified. Please review the changes and update the relevant documentation in either the README_SIMPLE.md file or the appropriate files in the /docs folder to reflect any new features, configuration changes, or architectural updates. Focus on keeping the documentation accurate and up-to-date with the current implementation."
+  },
+  "workspaceFolderName": "apagado-automatico",
+  "shortName": "docs-sync-hook"
+}

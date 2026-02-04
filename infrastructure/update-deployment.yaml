@@ -1,0 +1,71 @@
+# Patch para actualizar el deployment existente con las nuevas variables de entorno
+# Aplicar con: kubectl patch deployment namespace-scaler -n encendido-eks --patch-file update-deployment.yaml
+
+spec:
+  template:
+    spec:
+      containers:
+      - name: scaler
+        env:
+        # Variables existentes (mantener)
+        - name: AWS_REGION
+          value: us-east-1
+        - name: DYNAMODB_TABLE
+          value: NamespaceSchedules
+        - name: TIMEZONE
+          value: America/Bogota
+        - name: SYSTEM_NAMESPACES
+          value: kube-system,kube-public,kube-node-lease,default,argocd,kyverno,encendido-eks,karpenter
+        - name: LOG_LEVEL
+          value: INFO
+        
+        # Nuevas variables para el sistema MVP
+        - name: DYNAMODB_GSI_NAME
+          value: estado-fecha_encendido-index
+        - name: S3_CONFIG_BUCKET
+          valueFrom:
+            configMapKeyRef:
+              name: namespace-scheduler-config
+              key: s3_bucket_name
+        - name: S3_CONFIG_KEY
+          value: config.json
+        - name: ENVIRONMENT
+          value: prod
+        - name: SERVICE_VERSION
+          value: "1.0.0"
+        - name: CLUSTER_NAME
+          value: "eks-cluster"
+        
+        # Variables opcionales para notificaciones (configurar según necesidad)
+        - name: SLACK_WEBHOOK_URL
+          valueFrom:
+            secretKeyRef:
+              name: notification-secrets
+              key: slack_webhook_url
+              optional: true
+        - name: SMTP_SERVER
+          valueFrom:
+            secretKeyRef:
+              name: notification-secrets
+              key: smtp_server
+              optional: true
+        - name: SMTP_PORT
+          value: "587"
+        - name: SMTP_USER
+          valueFrom:
+            secretKeyRef:
+              name: notification-secrets
+              key: smtp_user
+              optional: true
+        - name: SMTP_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: notification-secrets
+              key: smtp_password
+              optional: true
+        - name: NOTIFICATION_EMAIL
+          valueFrom:
+            secretKeyRef:
+              name: notification-secrets
+              key: notification_email
+              optional: true

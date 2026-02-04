@@ -1,85 +1,36 @@
 apiVersion: argoproj.io/v1alpha1
-kind: AppProject
-metadata:
-  name: apagado-automatico
-  namespace: argocd
-spec:
-  sourceRepos:
-  - '*'
-  destinations:
-  - namespace: '*'
-    server: https://kubernetes.default.svc
-  clusterResourceWhitelist:
-  - group: ''
-    kind: Namespace
-  - group: 'rbac.authorization.k8s.io'
-    kind: ClusterRole
-  - group: 'rbac.authorization.k8s.io'
-    kind: ClusterRoleBinding
-  namespaceResourceWhitelist:
-  - group: ''
-    kind: '*'
-  - group: 'apps'
-    kind: '*'
-  - group: 'networking.k8s.io'
-    kind: '*'
-
----
-
-apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: apagado-controller
+  name: namespace-startup-scheduler-apps
   namespace: argocd
+  labels:
+    app.kubernetes.io/name: namespace-startup-scheduler-bootstrap
+    app.kubernetes.io/component: bootstrap
 spec:
-  project: apagado-automatico
+  project: default
+  
+  # Source configuration - App of Apps pattern
   source:
-    repoURL: https://github.com/bcocbo/apagado-automatico.git
-    path: controller
+    repoURL: https://github.com/YOUR_ORG/namespace-startup-scheduler
+    targetRevision: HEAD
+    path: argocd/apps
+    
+  # Destination configuration
   destination:
     server: https://kubernetes.default.svc
-    namespace: encendido-eks
+    namespace: argocd
+    
+  # Sync policy
   syncPolicy:
     automated:
-      prune: false
+      prune: true
       selfHeal: true
-
----
-
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: apagado-frontend
-  namespace: argocd
-spec:
-  project: apagado-automatico
-  source:
-    repoURL: https://github.com/bcocbo/apagado-automatico.git
-    path: frontend
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: encendido-eks
-  syncPolicy:
-    automated:
-      prune: false
-      selfHeal: true
-
----
-
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: apagado-policies
-  namespace: argocd
-spec:
-  project: apagado-automatico
-  source:
-    repoURL: https://github.com/bcocbo/apagado-automatico.git
-    path: policies
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: default
-  syncPolicy:
-    automated:
-      prune: false
-      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=false
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

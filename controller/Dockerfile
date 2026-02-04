@@ -45,9 +45,9 @@ FROM python:3.11-slim as production
 # Set labels for better maintainability
 LABEL maintainer="DevOps Team" \
       version="1.0.0" \
-      description="Namespace Auto-Shutdown Controller" \
-      org.opencontainers.image.title="Namespace Controller" \
-      org.opencontainers.image.description="Kubernetes namespace auto-shutdown controller" \
+      description="Namespace Startup Scheduler Controller" \
+      org.opencontainers.image.title="Namespace Startup Scheduler" \
+      org.opencontainers.image.description="Kubernetes namespace startup scheduler controller" \
       org.opencontainers.image.vendor="Your Organization" \
       org.opencontainers.image.licenses="MIT"
 
@@ -102,5 +102,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
 # Use tini as init system for proper signal handling
 ENTRYPOINT ["/usr/bin/tini", "--"]
 
-# Default command
+# Default command (will be updated when we convert to FastAPI)
 CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]
