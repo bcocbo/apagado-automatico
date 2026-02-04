@@ -27,9 +27,10 @@ Sistema MVP para programar el auto-encendido de namespaces en un cluster de Kube
 2. CUANDO se construyen imágenes Docker, EL Pipeline DEBERÁ usar Dockerfiles optimizados para controlador y frontend
 3. CUANDO se referencian outputs de steps, EL Pipeline DEBERÁ usar sintaxis y nombres de variables correctos
 4. CUANDO se validan archivos YAML, EL Pipeline DEBERÁ validar todos los manifiestos de Kubernetes completamente
-5. CUANDO se escanean vulnerabilidades de seguridad, EL Pipeline DEBERÁ analizar tanto código como imágenes de contenedor
-6. CUANDO se actualizan manifiestos, EL Pipeline DEBERÁ usar rutas de archivos correctas y desplegar directamente con kubectl
-7. CUANDO el pipeline falla, EL Pipeline DEBERÁ proporcionar mensajes de error claros y capacidades de rollback con kubectl
+5. CUANDO existen políticas Kyverno, EL Pipeline DEBERÁ validarlas opcionalmente sin fallar si no existen
+6. CUANDO se escanean vulnerabilidades de seguridad, EL Pipeline DEBERÁ analizar tanto código como imágenes de contenedor
+7. CUANDO se actualizan manifiestos, EL Pipeline DEBERÁ usar rutas de archivos correctas y desplegar directamente con kubectl
+8. CUANDO el pipeline falla, EL Pipeline DEBERÁ proporcionar mensajes de error claros y capacidades de rollback con kubectl
 
 ### Requisito 2: Infraestructura de Contenedores Segura
 

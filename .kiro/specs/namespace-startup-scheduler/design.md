@@ -234,11 +234,12 @@ def existe_conflicto_namespace(nueva_programacion):
 - Autenticación segura sin access keys
 - Build multi-plataforma (amd64/arm64)
 - Escaneo de seguridad automático
+- Validación de políticas Kyverno (opcional)
 - Rollback automático en caso de fallo
 
 **Flujo**:
 ```yaml
-Lint → Security Scan → Test → Build → Deploy → Verify
+Lint → Security Scan → Policy Validation → Test → Build → Deploy → Verify
                                 ↓
                            Rollback (si falla)
 ```
