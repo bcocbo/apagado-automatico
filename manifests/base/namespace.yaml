@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: backstage-auth
+  labels:
+    name: backstage-auth
+    argocd.argoproj.io/managed-by: argocd

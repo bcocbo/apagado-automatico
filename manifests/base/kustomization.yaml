@@ -1,0 +1,25 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+
+resources:
+- namespace.yaml           # Crea el namespace
+- postgres.yaml           # Despliega PostgreSQL
+- backstage-deployment.yaml # Despliega Backstage
+- backstage-service.yaml   # Servicio de Backstage
+- rbac.yaml               # Permisos RBAC
+
+secretGenerator:
+- name: postgres-secrets
+  literals:
+  - POSTGRES_USER=backstage
+  - POSTGRES_PASSWORD=backstage
+  - POSTGRES_DB=backstage
+
+- name: backstage-secrets
+  literals:
+  - GITHUB_TOKEN=change-me
+  - AUTH_GITHUB_CLIENT_ID=change-me
+  - AUTH_GITHUB_CLIENT_SECRET=change-me
+
+---

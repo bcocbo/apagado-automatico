@@ -1,0 +1,25 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# "USA TODO LO QUE ESTÁ EN ../../base/"
+resources:
+- ../../base              # REFERENCIA A LA CARPETA BASE
+- ingress.yaml
+
+
+
+
+# PATCHES QUE MODIFICAN LOS RECURSOS BASE
+patchesStrategicMerge:
+- backstage-patch.yaml   #  MODIFICA EL DEPLOYMENT BASE
+
+# ESCALA LAS RÉPLICAS PARA PRODUCCIÓN
+replicas:
+- name: backstage-auth
+  count: 1
+
+# REEMPLAZA LA IMAGEN DEL DEPLOYMENT BASE
+images:
+- name: backstage-auth        # NOMBRE DEL CONTENEDOR EN EL DEPLOYMENT BASE
+  newName: YOUR_ECR_REGISTRY/backstage-auth
+  newTag: latest

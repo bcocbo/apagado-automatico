@@ -1,0 +1,92 @@
+name: Build and Push Backstage
+on:
+  push:
+    branches: [main, develop]
+    paths:
+    - 'app/**'
+    - 'packages/**'
+    - 'Dockerfile'
+    - '.github/workflows/build-backstage.yml'
+    - 'app-config.yaml'
+  pull_request:
+    branches: [main]
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: backstage-auth
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}  
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push
+      id: build
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        
+
+  update-manifests:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+    - name: Checkout manifests repo
+      uses: actions/checkout@v4
+      with:
+        repository: bcocbo/backstage-k8s-manifests-auth
+        token: ${{ secrets.MANIFESTS_REPO_TOKEN }}  
+        path: manifests-repo
+
+
+    - name: Update image tag
+      run: |
+        cd manifests-repo
+        NEW_TAG=$(echo "${{ needs.build-and-push.outputs.image-tag }}" | grep "main-" | head -1)
+        sed -i "s|image: .*backstage.*|image: $NEW_TAG|g" manifests/base/backstage-deployment.yaml
+      
+    - name: Commit and push changes
+      run: |
+        cd manifests-repo
+        git config user.name "GitHub Actions"
+        git config user.email "actions@github.com"
+        git add .
+        git commit -m "Update backstage image to ${{ github.sha }}" || exit 0
+        git push
+
+---
