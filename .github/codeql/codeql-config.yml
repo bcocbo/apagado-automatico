@@ -54,6 +54,3 @@ query-filters:
         - security
         - external/cwe
         - external/owasp
-
-# External data sources for enhanced analysis
-external-repository-token: ${{ secrets.GITHUB_TOKEN }}
