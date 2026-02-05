@@ -15,6 +15,10 @@ env:
   ECR_REPOSITORY_FRONTEND: task-scheduler-frontend
   ECR_REPOSITORY_KUBECTL: kubectl-runner
 
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   build-frontend:
     runs-on: ubuntu-latest
@@ -28,9 +32,8 @@ jobs:
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}  
+        role-to-assume: arn:aws:iam::226633502530:role/github-actions-role
+        role-session-name: GitHubActions-TaskScheduler
         aws-region: ${{ env.AWS_REGION }}
 
     - name: Set up Docker Buildx
@@ -73,9 +76,8 @@ jobs:
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}  
+        role-to-assume: arn:aws:iam::226633502530:role/github-actions-role
+        role-session-name: GitHubActions-TaskScheduler
         aws-region: ${{ env.AWS_REGION }}
 
     - name: Set up Docker Buildx

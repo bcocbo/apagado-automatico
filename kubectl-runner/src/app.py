@@ -2,6 +2,7 @@
 """
 kubectl Runner API Server
 Provides REST API for executing kubectl commands and managing scheduled tasks
+Version: 1.1.0 - Updated for OIDC authentication
 """
 
 import os
