@@ -6,20 +6,22 @@ resources:
 - ../../base              # REFERENCIA A LA CARPETA BASE
 - ingress.yaml
 
-
-
-
 # PATCHES QUE MODIFICAN LOS RECURSOS BASE
 patchesStrategicMerge:
-- backstage-patch.yaml   #  MODIFICA EL DEPLOYMENT BASE
+- task-scheduler-patch.yaml   #  MODIFICA EL DEPLOYMENT BASE
 
 # ESCALA LAS RÉPLICAS PARA PRODUCCIÓN
 replicas:
-- name: backstage-auth
+- name: task-scheduler-frontend
+  count: 2
+- name: kubectl-runner
   count: 1
 
 # REEMPLAZA LA IMAGEN DEL DEPLOYMENT BASE
 images:
-- name: backstage-auth        # NOMBRE DEL CONTENEDOR EN EL DEPLOYMENT BASE
-  newName: YOUR_ECR_REGISTRY/backstage-auth
+- name: task-scheduler-frontend
+  newName: 226633502530.dkr.ecr.us-east-1.amazonaws.com/task-scheduler-frontend
+  newTag: latest
+- name: kubectl-runner
+  newName: 226633502530.dkr.ecr.us-east-1.amazonaws.com/kubectl-runner
   newTag: latest

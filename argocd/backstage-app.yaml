@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: backstage-auth
+  name: task-scheduler
   namespace: argocd
   finalizers:
     - resources-finalizer.argocd.argoproj.io
@@ -13,7 +13,7 @@ spec:
     path: manifests/overlays/production    
   destination:
     server: https://kubernetes.default.svc
-    namespace: backstage-auth
+    namespace: task-scheduler
   syncPolicy:
     automated:
       prune: true

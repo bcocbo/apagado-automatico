@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: task-scheduler-frontend-service
+  namespace: task-scheduler
+  labels:
+    app: task-scheduler-frontend
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 80
+    protocol: TCP
+    name: http
+  selector:
+    app: task-scheduler-frontend
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubectl-runner-service
+  namespace: task-scheduler
+  labels:
+    app: kubectl-runner
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: kubectl-runner

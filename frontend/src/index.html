@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task Scheduler - Programador de Tareas EKS</title>
+    <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="styles.css" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container">
+            <a class="navbar-brand" href="#">
+                <i class="fas fa-tasks"></i> Task Scheduler EKS
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" onclick="showDashboard()">Dashboard</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" onclick="showScheduler()">Programador</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" onclick="showLogs()">Logs</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid mt-4">
+        <!-- Dashboard Section -->
+        <div id="dashboard-section" class="section">
+            <div class="row">
+                <div class="col-md-3">
+                    <div class="card bg-primary text-white">
+                        <div class="card-body">
+                            <h5>Tareas Activas</h5>
+                            <h2 id="active-tasks">0</h2>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card bg-success text-white">
+                        <div class="card-body">
+                            <h5>Completadas Hoy</h5>
+                            <h2 id="completed-tasks">0</h2>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card bg-warning text-white">
+                        <div class="card-body">
+                            <h5>Pendientes</h5>
+                            <h2 id="pending-tasks">0</h2>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card bg-danger text-white">
+                        <div class="card-body">
+                            <h5>Fallidas</h5>
+                            <h2 id="failed-tasks">0</h2>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Scheduler Section -->
+        <div id="scheduler-section" class="section" style="display: none;">
+            <div class="row">
+                <div class="col-md-8">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5>Calendario de Tareas</h5>
+                        </div>
+                        <div class="card-body">
+                            <div id="calendar"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5>Nueva Tarea</h5>
+                        </div>
+                        <div class="card-body">
+                            <form id="task-form">
+                                <div class="mb-3">
+                                    <label for="task-name" class="form-label">Nombre de la Tarea</label>
+                                    <input type="text" class="form-control" id="task-name" required>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="task-command" class="form-label">Comando kubectl</label>
+                                    <textarea class="form-control" id="task-command" rows="3" placeholder="kubectl get pods -n default" required></textarea>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="task-schedule" class="form-label">Programación (Cron)</label>
+                                    <input type="text" class="form-control" id="task-schedule" placeholder="0 */6 * * *" required>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="task-namespace" class="form-label">Namespace</label>
+                                    <input type="text" class="form-control" id="task-namespace" value="default">
+                                </div>
+                                <button type="submit" class="btn btn-primary">Crear Tarea</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Logs Section -->
+        <div id="logs-section" class="section" style="display: none;">
+            <div class="card">
+                <div class="card-header">
+                    <h5>Logs de Ejecución</h5>
+                    <button class="btn btn-sm btn-secondary float-end" onclick="refreshLogs()">Actualizar</button>
+                </div>
+                <div class="card-body">
+                    <div id="logs-container" class="logs-container">
+                        <!-- Logs will be loaded here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Task Details Modal -->
+    <div class="modal fade" id="taskModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Detalles de la Tarea</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="task-details"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+                    <button type="button" class="btn btn-danger" onclick="deleteTask()">Eliminar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.js"></script>
+    <script src="https://kit.fontawesome.com/a076d05399.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: backstage-auth
+  name: task-scheduler
   labels:
-    name: backstage-auth
+    name: task-scheduler
     argocd.argoproj.io/managed-by: argocd

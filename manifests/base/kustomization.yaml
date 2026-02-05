@@ -1,25 +1,20 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-
 resources:
-- namespace.yaml           # Crea el namespace
-- postgres.yaml           # Despliega PostgreSQL
-- backstage-deployment.yaml # Despliega Backstage
-- backstage-service.yaml   # Servicio de Backstage
-- rbac.yaml               # Permisos RBAC
+- namespace.yaml
+- task-scheduler-deployment.yaml
+- task-scheduler-service.yaml
+- kubectl-runner-rbac.yaml
 
-secretGenerator:
-- name: postgres-secrets
-  literals:
-  - POSTGRES_USER=backstage
-  - POSTGRES_PASSWORD=backstage
-  - POSTGRES_DB=backstage
+commonLabels:
+  app.kubernetes.io/name: task-scheduler
+  app.kubernetes.io/instance: task-scheduler
 
-- name: backstage-secrets
-  literals:
-  - GITHUB_TOKEN=change-me
-  - AUTH_GITHUB_CLIENT_ID=change-me
-  - AUTH_GITHUB_CLIENT_SECRET=change-me
-
----
+images:
+- name: task-scheduler-frontend
+  newName: 226633502530.dkr.ecr.us-east-1.amazonaws.com/task-scheduler-frontend
+  newTag: latest
+- name: kubectl-runner
+  newName: 226633502530.dkr.ecr.us-east-1.amazonaws.com/kubectl-runner
+  newTag: latest
