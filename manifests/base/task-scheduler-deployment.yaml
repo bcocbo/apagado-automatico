@@ -19,7 +19,7 @@ spec:
         karpenter.sh/nodepool: spot
       containers:
       - name: frontend
-        image: 226633502530.dkr.ecr.us-east-1.amazonaws.com/task-scheduler-frontend:latest
+        image: task-scheduler-frontend:latest
         ports:
         - containerPort: 80
         resources:
@@ -45,26 +45,26 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: kubectl-runner
+  name: task-scheduler-backend
   namespace: task-scheduler
   labels:
-    app: kubectl-runner
+    app: task-scheduler-backend
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: kubectl-runner
+      app: task-scheduler-backend
   template:
     metadata:
       labels:
-        app: kubectl-runner
+        app: task-scheduler-backend
     spec:
       nodeSelector:
         karpenter.sh/nodepool: spot
       serviceAccountName: kubectl-runner
       containers:
-      - name: kubectl-runner
-        image: 226633502530.dkr.ecr.us-east-1.amazonaws.com/kubectl-runner:latest
+      - name: backend
+        image: task-scheduler-backend:latest
         ports:
         - containerPort: 8080
         env:
@@ -72,6 +72,10 @@ spec:
           value: "poc-kafka"
         - name: AWS_REGION
           value: "us-east-1"
+        - name: DYNAMODB_TABLE_NAME
+          value: "task-scheduler-logs"
+        - name: PERMISSIONS_TABLE_NAME
+          value: "cost-center-permissions"
         resources:
           requests:
             memory: "256Mi"
@@ -101,12 +105,12 @@ spec:
         emptyDir: {}
       - name: config
         persistentVolumeClaim:
-          claimName: kubectl-runner-config
+          claimName: task-scheduler-backend-config
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: kubectl-runner-config
+  name: task-scheduler-backend-config
   namespace: task-scheduler
 spec:
   accessModes:

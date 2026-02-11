@@ -17,16 +17,16 @@ aws ecr create-repository \
     --encryption-configuration encryptionType=AES256 \
     2>/dev/null || echo "✓ Repositorio task-scheduler-frontend ya existe"
 
-# Crear repositorio para kubectl-runner
-echo "📦 Creando repositorio kubectl-runner..."
+# Crear repositorio para backend
+echo "📦 Creando repositorio task-scheduler-backend..."
 aws ecr create-repository \
-    --repository-name kubectl-runner \
+    --repository-name task-scheduler-backend \
     --region $AWS_REGION \
     --image-scanning-configuration scanOnPush=true \
     --encryption-configuration encryptionType=AES256 \
-    2>/dev/null || echo "✓ Repositorio kubectl-runner ya existe"
+    2>/dev/null || echo "✓ Repositorio task-scheduler-backend ya existe"
 
 echo ""
 echo "✅ Repositorios ECR listos:"
 echo "   - $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/task-scheduler-frontend"
-echo "   - $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/kubectl-runner"
+echo "   - $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/task-scheduler-backend"

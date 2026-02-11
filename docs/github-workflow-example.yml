@@ -1,0 +1,157 @@
+# Ejemplo de GitHub Actions Workflow para Task Scheduler
+# Archivo: .github/workflows/build-and-deploy.yml
+
+name: Build and Deploy Task Scheduler
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REGISTRY: 226633502530.dkr.ecr.us-east-1.amazonaws.com
+
+jobs:
+  build-frontend:
+    name: Build Frontend
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+        aws-region: ${{ secrets.AWS_REGION }}
+    
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+    
+    - name: Build, tag, and push frontend image
+      env:
+        ECR_REPOSITORY: task-scheduler-frontend
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        # Build image
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG ./frontend
+        docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+        
+        # Push image
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+        
+        echo "Frontend image pushed: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+  build-backend:
+    name: Build Backend
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+        aws-region: ${{ secrets.AWS_REGION }}
+    
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+    
+    - name: Build, tag, and push backend image
+      env:
+        ECR_REPOSITORY: task-scheduler-backend
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        # Build image
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG ./kubectl-runner
+        docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+        
+        # Push image
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+        
+        echo "Backend image pushed: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+  update-manifests:
+    name: Update Kubernetes Manifests
+    runs-on: ubuntu-latest
+    needs: [build-frontend, build-backend]
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Update image tags in manifests
+      env:
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        # Update frontend image tag
+        sed -i "s|newTag: .*|newTag: $IMAGE_TAG|g" manifests/overlays/production/kustomization.yaml
+        
+        # Commit changes
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add manifests/overlays/production/kustomization.yaml
+        git commit -m "Update image tags to $IMAGE_TAG" || exit 0
+        git push
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: [build-frontend, build-backend]
+    permissions:
+      id-token: write
+      contents: read
+      security-events: write
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+        aws-region: ${{ secrets.AWS_REGION }}
+    
+    - name: Login to Amazon ECR
+      uses: aws-actions/amazon-ecr-login@v2
+    
+    - name: Scan frontend image
+      env:
+        ECR_REPOSITORY: task-scheduler-frontend
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        # Trigger ECR scan
+        aws ecr start-image-scan \
+          --repository-name $ECR_REPOSITORY \
+          --image-id imageTag=$IMAGE_TAG || true
+    
+    - name: Scan backend image
+      env:
+        ECR_REPOSITORY: task-scheduler-backend
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        # Trigger ECR scan
+        aws ecr start-image-scan \
+          --repository-name $ECR_REPOSITORY \
+          --image-id imageTag=$IMAGE_TAG || true

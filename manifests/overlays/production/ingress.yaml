@@ -20,7 +20,7 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: kubectl-runner-service
+                name: task-scheduler-backend-service
                 port:
                   number: 8080
           - path: /

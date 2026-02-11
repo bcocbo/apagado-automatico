@@ -18,10 +18,10 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: kubectl-runner-service
+  name: task-scheduler-backend-service
   namespace: task-scheduler
   labels:
-    app: kubectl-runner
+    app: task-scheduler-backend
 spec:
   type: ClusterIP
   ports:
@@ -30,4 +30,4 @@ spec:
     protocol: TCP
     name: http
   selector:
-    app: kubectl-runner
+    app: task-scheduler-backend

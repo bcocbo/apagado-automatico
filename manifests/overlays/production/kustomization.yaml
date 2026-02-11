@@ -14,7 +14,7 @@ patchesStrategicMerge:
 replicas:
 - name: task-scheduler-frontend
   count: 2
-- name: kubectl-runner
+- name: task-scheduler-backend
   count: 1
 
 # REEMPLAZA LA IMAGEN DEL DEPLOYMENT BASE
@@ -22,6 +22,6 @@ images:
 - name: task-scheduler-frontend
   newName: 226633502530.dkr.ecr.us-east-1.amazonaws.com/task-scheduler-frontend
   newTag: latest
-- name: kubectl-runner
-  newName: 226633502530.dkr.ecr.us-east-1.amazonaws.com/kubectl-runner
+- name: task-scheduler-backend
+  newName: 226633502530.dkr.ecr.us-east-1.amazonaws.com/task-scheduler-backend
   newTag: latest

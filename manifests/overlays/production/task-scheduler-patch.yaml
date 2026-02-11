@@ -19,13 +19,13 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: kubectl-runner
+  name: task-scheduler-backend
   namespace: task-scheduler
 spec:
   template:
     spec:
       containers:
-      - name: kubectl-runner
+      - name: backend
         resources:
           requests:
             memory: "512Mi"

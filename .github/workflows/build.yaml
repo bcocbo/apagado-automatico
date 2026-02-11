@@ -13,7 +13,7 @@ on:
 env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY_FRONTEND: task-scheduler-frontend
-  ECR_REPOSITORY_KUBECTL: kubectl-runner
+  ECR_REPOSITORY_BACKEND: task-scheduler-backend
 
 permissions:
   id-token: write
@@ -32,9 +32,9 @@ jobs:
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
-        role-to-assume: arn:aws:iam::226633502530:role/github-actions-role
+        role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
         role-session-name: GitHubActions-TaskScheduler
-        aws-region: ${{ env.AWS_REGION }}
+        aws-region: ${{ secrets.AWS_REGION }}
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
@@ -64,7 +64,7 @@ jobs:
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
 
-  build-kubectl-runner:
+  build-backend:
     runs-on: ubuntu-latest
     outputs:
       image-tag: ${{ steps.meta.outputs.tags }}
@@ -76,9 +76,9 @@ jobs:
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
-        role-to-assume: arn:aws:iam::226633502530:role/github-actions-role
+        role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
         role-session-name: GitHubActions-TaskScheduler
-        aws-region: ${{ env.AWS_REGION }}
+        aws-region: ${{ secrets.AWS_REGION }}
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
@@ -87,18 +87,18 @@ jobs:
       id: login-ecr
       uses: aws-actions/amazon-ecr-login@v2
 
-    - name: Extract metadata for kubectl runner
+    - name: Extract metadata for backend
       id: meta
       uses: docker/metadata-action@v5
       with:
-        images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_KUBECTL }}
+        images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_BACKEND }}
         tags: |
           type=ref,event=branch
           type=ref,event=pr
           type=sha,prefix={{branch}}-
           type=raw,value=latest,enable={{is_default_branch}}
 
-    - name: Build and push kubectl runner
+    - name: Build and push backend
       id: build
       uses: docker/build-push-action@v5
       with:
@@ -107,39 +107,29 @@ jobs:
         push: true
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
-        
 
   update-manifests:
-    needs: [build-frontend, build-kubectl-runner]
+    needs: [build-frontend, build-backend]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
     steps:
-    - name: Checkout manifests repo
+    - name: Checkout code
       uses: actions/checkout@v4
       with:
-        repository: bcocbo/backstage-k8s-manifests-auth
-        token: ${{ secrets.MANIFESTS_REPO_TOKEN }}  
-        path: manifests-repo
+        token: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Update frontend image tag
+    - name: Update image tags in kustomization
+      env:
+        IMAGE_TAG: ${{ github.sha }}
       run: |
-        cd manifests-repo
-        FRONTEND_TAG=$(echo "${{ needs.build-frontend.outputs.image-tag }}" | grep "main-" | head -1)
-        sed -i "s|image: .*task-scheduler-frontend.*|image: $FRONTEND_TAG|g" manifests/base/frontend-deployment.yaml
-
-    - name: Update kubectl runner image tag
-      run: |
-        cd manifests-repo
-        KUBECTL_TAG=$(echo "${{ needs.build-kubectl-runner.outputs.image-tag }}" | grep "main-" | head -1)
-        sed -i "s|image: .*kubectl-runner.*|image: $KUBECTL_TAG|g" manifests/base/kubectl-runner-deployment.yaml
-      
-    - name: Commit and push changes
-      run: |
-        cd manifests-repo
-        git config user.name "GitHub Actions"
-        git config user.email "actions@github.com"
-        git add .
-        git commit -m "Update container images to ${{ github.sha }}" || exit 0
+        # Update image tags in kustomization
+        sed -i "s|newTag: .*|newTag: $IMAGE_TAG|g" manifests/overlays/production/kustomization.yaml
+        
+        # Commit changes
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add manifests/overlays/production/kustomization.yaml
+        git commit -m "Update image tags to $IMAGE_TAG [skip ci]" || exit 0
         git push
-
----

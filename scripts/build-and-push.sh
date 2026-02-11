@@ -28,15 +28,15 @@ docker push $ECR_REGISTRY/task-scheduler-frontend:latest
 docker push $ECR_REGISTRY/task-scheduler-frontend:$(git rev-parse --short HEAD)
 
 echo ""
-echo -e "${BLUE}🏗️  Construyendo imagen del kubectl-runner...${NC}"
-docker build -t kubectl-runner:latest ./kubectl-runner
-docker tag kubectl-runner:latest $ECR_REGISTRY/kubectl-runner:latest
-docker tag kubectl-runner:latest $ECR_REGISTRY/kubectl-runner:$(git rev-parse --short HEAD)
+echo -e "${BLUE}🏗️  Construyendo imagen del Backend...${NC}"
+docker build -t task-scheduler-backend:latest ./kubectl-runner
+docker tag task-scheduler-backend:latest $ECR_REGISTRY/task-scheduler-backend:latest
+docker tag task-scheduler-backend:latest $ECR_REGISTRY/task-scheduler-backend:$(git rev-parse --short HEAD)
 
 echo ""
-echo -e "${BLUE}📤 Pusheando imagen del kubectl-runner a ECR...${NC}"
-docker push $ECR_REGISTRY/kubectl-runner:latest
-docker push $ECR_REGISTRY/kubectl-runner:$(git rev-parse --short HEAD)
+echo -e "${BLUE}📤 Pusheando imagen del Backend a ECR...${NC}"
+docker push $ECR_REGISTRY/task-scheduler-backend:latest
+docker push $ECR_REGISTRY/task-scheduler-backend:$(git rev-parse --short HEAD)
 
 echo ""
 echo -e "${GREEN}✅ Imágenes construidas y pusheadas exitosamente!${NC}"
@@ -46,9 +46,9 @@ echo "   Frontend:"
 echo "   - $ECR_REGISTRY/task-scheduler-frontend:latest"
 echo "   - $ECR_REGISTRY/task-scheduler-frontend:$(git rev-parse --short HEAD)"
 echo ""
-echo "   kubectl-runner:"
-echo "   - $ECR_REGISTRY/kubectl-runner:latest"
-echo "   - $ECR_REGISTRY/kubectl-runner:$(git rev-parse --short HEAD)"
+echo "   Backend:"
+echo "   - $ECR_REGISTRY/task-scheduler-backend:latest"
+echo "   - $ECR_REGISTRY/task-scheduler-backend:$(git rev-parse --short HEAD)"
 echo ""
 echo -e "${YELLOW}🚀 Siguiente paso: Desplegar con ArgoCD${NC}"
-echo "   kubectl apply -f argocd/backstage-app.yaml"
+echo "   kubectl apply -f argocd/namespace-scheduler-app.yaml"
