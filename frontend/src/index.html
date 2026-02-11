@@ -97,19 +97,78 @@
                                     <input type="text" class="form-control" id="task-name" required>
                                 </div>
                                 <div class="mb-3">
+                                    <label for="task-type" class="form-label">Tipo de Tarea</label>
+                                    <select class="form-control" id="task-type" onchange="toggleTaskFields()">
+                                        <option value="command">Comando kubectl</option>
+                                        <option value="activate">Activar Namespace</option>
+                                        <option value="deactivate">Desactivar Namespace</option>
+                                    </select>
+                                </div>
+                                <div class="mb-3" id="command-field">
                                     <label for="task-command" class="form-label">Comando kubectl</label>
-                                    <textarea class="form-control" id="task-command" rows="3" placeholder="kubectl get pods -n default" required></textarea>
+                                    <textarea class="form-control" id="task-command" rows="3" placeholder="kubectl get pods -n default"></textarea>
                                 </div>
                                 <div class="mb-3">
                                     <label for="task-schedule" class="form-label">Programación (Cron)</label>
                                     <input type="text" class="form-control" id="task-schedule" placeholder="0 */6 * * *" required>
+                                    <div class="form-text">
+                                        <small>Ejemplos: "0 20 * * 1-5" (8pm días laborales), "0 7 * * 1-5" (7am días laborales)</small>
+                                    </div>
                                 </div>
                                 <div class="mb-3">
                                     <label for="task-namespace" class="form-label">Namespace</label>
-                                    <input type="text" class="form-control" id="task-namespace" value="default">
+                                    <select class="form-control" id="task-namespace">
+                                        <option value="default">default</option>
+                                    </select>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="task-cost-center" class="form-label">Centro de Costo</label>
+                                    <select class="form-control" id="task-cost-center" required>
+                                        <option value="default">default</option>
+                                        <option value="development">development</option>
+                                        <option value="testing">testing</option>
+                                        <option value="production">production</option>
+                                    </select>
                                 </div>
                                 <button type="submit" class="btn btn-primary">Crear Tarea</button>
                             </form>
+                        </div>
+                    </div>
+                    
+                    <!-- Namespace Management Card -->
+                    <div class="card mt-3">
+                        <div class="card-header">
+                            <h5>Gestión de Namespaces</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                <label class="form-label">Namespaces Activos: <span id="active-ns-count">0</span>/5</label>
+                                <div class="progress mb-2">
+                                    <div class="progress-bar" id="ns-progress" role="progressbar" style="width: 0%"></div>
+                                </div>
+                                <small class="text-muted" id="business-hours-status">Horario laboral</small>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="ns-select" class="form-label">Seleccionar Namespace</label>
+                                <select class="form-control" id="ns-select">
+                                    <option value="">Seleccionar...</option>
+                                </select>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="ns-cost-center" class="form-label">Centro de Costo</label>
+                                <select class="form-control" id="ns-cost-center">
+                                    <option value="default">default</option>
+                                    <option value="development">development</option>
+                                    <option value="testing">testing</option>
+                                </select>
+                            </div>
+                            
+                            <div class="d-grid gap-2">
+                                <button class="btn btn-success" onclick="activateNamespace()">Activar</button>
+                                <button class="btn btn-warning" onclick="deactivateNamespace()">Desactivar</button>
+                            </div>
                         </div>
                     </div>
                 </div>

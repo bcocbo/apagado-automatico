@@ -3,6 +3,8 @@ class TaskScheduler {
     constructor() {
         this.calendar = null;
         this.tasks = [];
+        this.namespaces = [];
+        this.namespacesStatus = {};
         this.currentTaskId = null;
         this.init();
     }
@@ -11,8 +13,16 @@ class TaskScheduler {
         this.initCalendar();
         this.bindEvents();
         this.loadTasks();
+        this.loadNamespaces();
+        this.loadNamespacesStatus();
         this.updateDashboard();
         this.showDashboard();
+        
+        // Auto-refresh every 30 seconds
+        setInterval(() => {
+            this.loadNamespacesStatus();
+            this.updateDashboard();
+        }, 30000);
     }
 
     initCalendar() {
@@ -83,19 +93,169 @@ class TaskScheduler {
     handleTaskSubmit(e) {
         e.preventDefault();
         
+        const taskType = document.getElementById('task-type').value;
         const task = {
             id: this.generateId(),
             title: document.getElementById('task-name').value,
-            command: document.getElementById('task-command').value,
             schedule: document.getElementById('task-schedule').value,
             namespace: document.getElementById('task-namespace').value,
+            cost_center: document.getElementById('task-cost-center').value,
+            operation_type: taskType,
             status: 'pending',
             start: new Date().toISOString(),
             allDay: false
         };
 
+        // Add command only for command type tasks
+        if (taskType === 'command') {
+            task.command = document.getElementById('task-command').value;
+        }
+
         this.createTask(task);
         document.getElementById('task-form').reset();
+    }
+
+    async loadNamespaces() {
+        try {
+            const response = await fetch('/api/namespaces');
+            if (response.ok) {
+                this.namespaces = await response.json();
+                this.populateNamespaceSelects();
+            }
+        } catch (error) {
+            console.error('Error loading namespaces:', error);
+        }
+    }
+
+    async loadNamespacesStatus() {
+        try {
+            const response = await fetch('/api/namespaces/status');
+            if (response.ok) {
+                const data = await response.json();
+                this.namespacesStatus = data;
+                this.updateNamespaceStatus();
+            }
+        } catch (error) {
+            console.error('Error loading namespace status:', error);
+        }
+    }
+
+    populateNamespaceSelects() {
+        const selects = ['task-namespace', 'ns-select'];
+        selects.forEach(selectId => {
+            const select = document.getElementById(selectId);
+            if (select) {
+                // Clear existing options except first one
+                while (select.children.length > 1) {
+                    select.removeChild(select.lastChild);
+                }
+                
+                this.namespaces.forEach(namespace => {
+                    if (namespace !== 'default') {  // default is already there
+                        const option = document.createElement('option');
+                        option.value = namespace;
+                        option.textContent = namespace;
+                        select.appendChild(option);
+                    }
+                });
+            }
+        });
+    }
+
+    updateNamespaceStatus() {
+        if (!this.namespacesStatus) return;
+        
+        const activeCount = this.namespacesStatus.active_count || 0;
+        const isNonBusinessHours = this.namespacesStatus.is_non_business_hours;
+        
+        // Update active namespace count
+        document.getElementById('active-ns-count').textContent = activeCount;
+        
+        // Update progress bar
+        const progressBar = document.getElementById('ns-progress');
+        const percentage = (activeCount / 5) * 100;
+        progressBar.style.width = `${percentage}%`;
+        progressBar.className = `progress-bar ${percentage > 80 ? 'bg-danger' : percentage > 60 ? 'bg-warning' : 'bg-success'}`;
+        
+        // Update business hours status
+        const statusElement = document.getElementById('business-hours-status');
+        if (isNonBusinessHours) {
+            statusElement.textContent = 'Horario no hábil - Límite de 5 namespaces';
+            statusElement.className = 'text-warning';
+        } else {
+            statusElement.textContent = 'Horario laboral - Sin límite';
+            statusElement.className = 'text-success';
+        }
+    }
+
+    async activateNamespace() {
+        const namespace = document.getElementById('ns-select').value;
+        const costCenter = document.getElementById('ns-cost-center').value;
+        
+        if (!namespace) {
+            this.showNotification('Por favor selecciona un namespace', 'error');
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/namespaces/${namespace}/activate`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    cost_center: costCenter,
+                    user_id: 'web-user'
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (response.ok) {
+                this.showNotification(result.message, 'success');
+                this.loadNamespacesStatus();
+            } else {
+                this.showNotification(result.error, 'error');
+            }
+        } catch (error) {
+            console.error('Error activating namespace:', error);
+            this.showNotification('Error al activar namespace', 'error');
+        }
+    }
+
+    async deactivateNamespace() {
+        const namespace = document.getElementById('ns-select').value;
+        const costCenter = document.getElementById('ns-cost-center').value;
+        
+        if (!namespace) {
+            this.showNotification('Por favor selecciona un namespace', 'error');
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/namespaces/${namespace}/deactivate`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    cost_center: costCenter,
+                    user_id: 'web-user'
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (response.ok) {
+                this.showNotification(result.message, 'success');
+                this.loadNamespacesStatus();
+            } else {
+                this.showNotification(result.error, 'error');
+            }
+        } catch (error) {
+            console.error('Error deactivating namespace:', error);
+            this.showNotification('Error al desactivar namespace', 'error');
+        }
     }
 
     async createTask(task) {
@@ -173,13 +333,19 @@ class TaskScheduler {
 
     showTaskDetails(task) {
         this.currentTaskId = task.id;
+        const operationType = task.operation_type || 'command';
+        const commandDisplay = operationType === 'command' ? task.command : `${operationType} namespace: ${task.namespace}`;
+        
         const details = `
             <p><strong>Nombre:</strong> ${task.title}</p>
-            <p><strong>Comando:</strong> <code>${task.command}</code></p>
+            <p><strong>Tipo:</strong> ${operationType}</p>
+            <p><strong>Comando/Operación:</strong> <code>${commandDisplay}</code></p>
             <p><strong>Programación:</strong> ${task.schedule}</p>
             <p><strong>Namespace:</strong> ${task.namespace}</p>
+            <p><strong>Centro de Costo:</strong> ${task.cost_center || 'default'}</p>
             <p><strong>Estado:</strong> <span class="status-badge status-${task.status}">${task.status}</span></p>
             <p><strong>Fecha:</strong> ${new Date(task.start).toLocaleString()}</p>
+            <p><strong>Ejecuciones:</strong> ${task.run_count || 0} (${task.success_count || 0} exitosas, ${task.error_count || 0} fallidas)</p>
         `;
         document.getElementById('task-details').innerHTML = details;
         new bootstrap.Modal(document.getElementById('taskModal')).show();
@@ -267,6 +433,8 @@ function showScheduler() {
     hideAllSections();
     document.getElementById('scheduler-section').style.display = 'block';
     taskScheduler.calendar.render();
+    taskScheduler.loadNamespaces();
+    taskScheduler.loadNamespacesStatus();
 }
 
 function showLogs() {
@@ -287,6 +455,29 @@ function deleteTask() {
 
 function refreshLogs() {
     taskScheduler.refreshLogs();
+}
+
+function toggleTaskFields() {
+    const taskType = document.getElementById('task-type').value;
+    const commandField = document.getElementById('command-field');
+    const commandInput = document.getElementById('task-command');
+    
+    if (taskType === 'command') {
+        commandField.style.display = 'block';
+        commandInput.required = true;
+    } else {
+        commandField.style.display = 'none';
+        commandInput.required = false;
+        commandInput.value = '';
+    }
+}
+
+function activateNamespace() {
+    taskScheduler.activateNamespace();
+}
+
+function deactivateNamespace() {
+    taskScheduler.deactivateNamespace();
 }
 
 // Initialize the application

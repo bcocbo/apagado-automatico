@@ -12,6 +12,7 @@ RUN apk add --no-cache \
     git \
     openssh-client \
     ca-certificates \
+    openssl \
     && rm -rf /var/cache/apk/*
 
 # Install kubectl
@@ -30,16 +31,21 @@ RUN curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | b
 
 # Install additional tools
 RUN pip3 install --no-cache-dir \
-    flask \
-    flask-cors \
+    flask==2.3.3 \
+    flask-cors==4.0.0 \
     kubernetes \
-    boto3 \
-    croniter \
-    pyyaml \
-    requests
+    boto3==1.28.85 \
+    croniter==1.4.1 \
+    pyyaml==6.0.1 \
+    requests==2.31.0 \
+    python-dateutil==2.8.2
 
 # Create app directory
 WORKDIR /app
+
+# Copy requirements first for better caching
+COPY requirements.txt ./
+RUN pip3 install --no-cache-dir -r requirements.txt
 
 # Copy application files
 COPY src/ ./

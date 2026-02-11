@@ -52,6 +52,90 @@ body {
 .task-completed { background-color: #28a745; }
 .task-failed { background-color: #dc3545; }
 
+/* Namespace management styles */
+.namespace-status {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    margin: 5px 0;
+    border-radius: 6px;
+    background-color: #f8f9fa;
+    border-left: 4px solid #dee2e6;
+}
+
+.namespace-status.active {
+    background-color: #d4edda;
+    border-left-color: #28a745;
+}
+
+.namespace-status.inactive {
+    background-color: #f8d7da;
+    border-left-color: #dc3545;
+}
+
+.namespace-status.system {
+    background-color: #e2e3e5;
+    border-left-color: #6c757d;
+}
+
+.namespace-name {
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.namespace-pods {
+    font-size: 12px;
+    color: #6c757d;
+}
+
+.namespace-actions {
+    display: flex;
+    gap: 5px;
+}
+
+.btn-xs {
+    padding: 2px 8px;
+    font-size: 11px;
+    border-radius: 3px;
+}
+
+/* Progress bar for namespace limits */
+.progress {
+    height: 8px;
+    border-radius: 4px;
+}
+
+.progress-bar {
+    transition: width 0.3s ease;
+}
+
+/* Business hours indicator */
+.business-hours-indicator {
+    padding: 8px 12px;
+    border-radius: 6px;
+    text-align: center;
+    font-weight: 600;
+    margin-bottom: 15px;
+}
+
+.business-hours-indicator.business {
+    background-color: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+
+.business-hours-indicator.non-business {
+    background-color: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffeaa7;
+}
+
+/* Task type specific styles */
+.task-type-command { border-left: 4px solid #007bff; }
+.task-type-activate { border-left: 4px solid #28a745; }
+.task-type-deactivate { border-left: 4px solid #dc3545; }
+
 /* Logs container */
 .logs-container {
     background-color: #1e1e1e;
@@ -85,6 +169,28 @@ body {
     box-shadow: 0 0 0 0.2rem rgba(0,123,255,.25);
 }
 
+.form-text small {
+    color: #6c757d;
+    font-size: 11px;
+}
+
+/* Notification styles */
+.notification {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 9999;
+    min-width: 300px;
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+
 /* Responsive improvements */
 @media (max-width: 768px) {
     .container-fluid {
@@ -97,6 +203,12 @@ body {
     
     #calendar {
         font-size: 12px;
+    }
+    
+    .notification {
+        right: 10px;
+        left: 10px;
+        min-width: auto;
     }
 }
 
@@ -129,3 +241,32 @@ body {
 .status-running { background-color: #d1ecf1; color: #0c5460; }
 .status-completed { background-color: #d4edda; color: #155724; }
 .status-failed { background-color: #f8d7da; color: #721c24; }
+
+/* Dashboard cards hover effect */
+.card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+    transition: all 0.3s ease;
+}
+
+/* Button improvements */
+.btn {
+    border-radius: 6px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+}
+
+.btn:hover {
+    transform: translateY(-1px);
+}
+
+/* Cost center validation */
+.cost-center-valid {
+    border-color: #28a745;
+    background-color: #f8fff9;
+}
+
+.cost-center-invalid {
+    border-color: #dc3545;
+    background-color: #fff8f8;
+}
