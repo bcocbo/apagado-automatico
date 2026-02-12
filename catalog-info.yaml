@@ -1,0 +1,10 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: apagado-automatico
+  annotations:
+    github.com/project-slug: bcocbo/apagado-automatico
+spec:
+  type: other
+  lifecycle: unknown
+  owner: guests
