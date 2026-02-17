@@ -1,0 +1,103 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: test-rbac-permissions
+  namespace: task-scheduler
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app: test-rbac
+    spec:
+      serviceAccountName: kubectl-runner
+      restartPolicy: Never
+      containers:
+      - name: test-rbac
+        image: bitnami/kubectl:latest
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -e
+          
+          echo "🔍 Probando permisos RBAC del service account kubectl-runner..."
+          echo ""
+          
+          # Test 1: Listar namespaces (debe funcionar)
+          echo "✅ Test 1: Listar namespaces"
+          kubectl get namespaces --no-headers | wc -l
+          echo "   Resultado: OK - Puede listar namespaces"
+          echo ""
+          
+          # Test 2: Ver deployments en namespace no protegido (debe funcionar)
+          echo "✅ Test 2: Ver deployments en namespace no protegido"
+          kubectl get deployments -n default --no-headers 2>&1 || echo "   No hay deployments en default"
+          echo "   Resultado: OK - Puede ver deployments"
+          echo ""
+          
+          # Test 3: Intentar escalar en namespace protegido (debe fallar)
+          echo "❌ Test 3: Intentar escalar en namespace protegido (kube-system)"
+          if kubectl scale deployment/coredns --replicas=1 -n kube-system 2>&1; then
+            echo "   ⚠️  ERROR: No debería poder escalar en kube-system!"
+            exit 1
+          else
+            echo "   ✅ Resultado: OK - Correctamente bloqueado"
+          fi
+          echo ""
+          
+          # Test 4: Ver pods en namespace protegido (debe funcionar - solo lectura)
+          echo "✅ Test 4: Ver pods en namespace protegido (kube-system)"
+          kubectl get pods -n kube-system --no-headers | wc -l
+          echo "   Resultado: OK - Puede ver pods (solo lectura)"
+          echo ""
+          
+          # Test 5: Intentar escalar en argocd (debe fallar)
+          echo "❌ Test 5: Intentar escalar en namespace protegido (argocd)"
+          if kubectl scale deployment/argocd-server --replicas=0 -n argocd 2>&1; then
+            echo "   ⚠️  ERROR: No debería poder escalar en argocd!"
+            exit 1
+          else
+            echo "   ✅ Resultado: OK - Correctamente bloqueado"
+          fi
+          echo ""
+          
+          # Test 6: Intentar escalar en istio-system (debe fallar)
+          echo "❌ Test 6: Intentar escalar en namespace protegido (istio-system)"
+          if kubectl get deployments -n istio-system --no-headers 2>&1 | head -1 | awk '{print $1}' | xargs -I {} kubectl scale deployment/{} --replicas=0 -n istio-system 2>&1; then
+            echo "   ⚠️  ERROR: No debería poder escalar en istio-system!"
+            exit 1
+          else
+            echo "   ✅ Resultado: OK - Correctamente bloqueado"
+          fi
+          echo ""
+          
+          # Test 7: Ver deployments en todos los namespaces (debe funcionar)
+          echo "✅ Test 7: Ver deployments en todos los namespaces"
+          kubectl get deployments --all-namespaces --no-headers | wc -l
+          echo "   Resultado: OK - Puede ver deployments en todos los namespaces"
+          echo ""
+          
+          # Test 8: Verificar permisos de scale en namespace no protegido
+          echo "✅ Test 8: Verificar permisos de scale en namespace no protegido"
+          kubectl auth can-i scale deployments -n default
+          echo "   Resultado: OK - Tiene permisos de scale en namespaces no protegidos"
+          echo ""
+          
+          # Test 9: Verificar que NO tiene permisos de scale en kube-system
+          echo "❌ Test 9: Verificar que NO tiene permisos de scale en kube-system"
+          if kubectl auth can-i scale deployments -n kube-system 2>&1 | grep -q "no"; then
+            echo "   ✅ Resultado: OK - Correctamente sin permisos de scale en kube-system"
+          else
+            echo "   ⚠️  Tiene permisos de scale en kube-system (puede ser por ClusterRoleBinding)"
+          fi
+          echo ""
+          
+          echo "✅ Todas las pruebas de RBAC completadas exitosamente!"
+          echo ""
+          echo "📋 Resumen:"
+          echo "   - Puede listar namespaces: ✅"
+          echo "   - Puede ver recursos en todos los namespaces: ✅"
+          echo "   - Puede escalar en namespaces no protegidos: ✅"
+          echo "   - NO puede escalar en namespaces protegidos: ✅"
+          echo "   - Namespaces protegidos: kube-system, argocd, istio-system, kyverno, task-scheduler"

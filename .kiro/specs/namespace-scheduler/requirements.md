@@ -63,14 +63,17 @@ Sistema de programación automática de namespaces en Kubernetes que permite act
 
 ### 5. Monitoreo y Logs
 **Como** administrador del cluster
-**Quiero** ver logs detallados de todas las operaciones
-**Para** monitorear el sistema y diagnosticar problemas
+**Quiero** ver logs detallados de todas las operaciones con capacidades de auditoría avanzadas
+**Para** monitorear el sistema, diagnosticar problemas y mantener trazabilidad completa
 
 **Criterios de Aceptación:**
 5.1 Debe mostrar logs de ejecución en tiempo real
-5.2 Debe registrar todas las operaciones en DynamoDB
+5.2 Debe registrar todas las operaciones en DynamoDB con información completa de auditoría
 5.3 Debe mostrar estadísticas del dashboard (tareas activas, completadas, fallidas)
-5.4 Debe permitir filtrar logs por fecha y centro de costo
+5.4 Debe permitir filtrar logs por fecha, centro de costo, cluster y usuario solicitante
+5.5 Debe rastrear qué usuario solicitó cada operación para auditoría
+5.6 Debe permitir consultas por cluster específico para análisis de actividad
+5.7 Debe generar reportes de actividad por usuario y cluster
 
 ### 6. Despliegue con ArgoCD
 **Como** DevOps engineer
@@ -93,6 +96,20 @@ Sistema de programación automática de namespaces en Kubernetes que permite act
 7.2 Debe construir imagen del backend automáticamente
 7.3 Debe subir las imágenes a ECR
 7.4 Debe actualizar los tags en los manifiestos de Kubernetes
+
+### 8. Auditoría y Trazabilidad Avanzada
+**Como** administrador de seguridad
+**Quiero** tener capacidades completas de auditoría y trazabilidad de operaciones
+**Para** cumplir con requisitos de compliance y seguridad
+
+**Criterios de Aceptación:**
+8.1 Debe registrar el usuario que solicita cada operación
+8.2 Debe registrar el cluster donde se ejecuta cada operación
+8.3 Debe permitir consultar todas las operaciones por usuario solicitante
+8.4 Debe permitir consultar todas las operaciones por cluster
+8.5 Debe generar reportes de auditoría por usuario y cluster
+8.6 Debe mantener trazabilidad completa de la cadena de aprobación
+8.7 Debe permitir exportar logs de auditoría para análisis externos
 
 ## Restricciones Técnicas
 

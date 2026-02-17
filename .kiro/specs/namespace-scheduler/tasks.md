@@ -14,73 +14,86 @@
 - [x] Configurar secrets de AWS en GitHub
 - [x] Configurar push automático a ECR
 - [x] Configurar actualización de tags en manifiestos
-
 ### 1.3 Configurar DynamoDB
-- [ ] Crear tabla `task-scheduler-logs` con índices apropiados
-- [ ] Crear tabla `cost-center-permissions` para validación
-- [ ] Configurar IAM roles para acceso desde EKS
-- [ ] Poblar tabla de permisos con centros de costo iniciales
-- [ ] Probar conectividad desde kubectl-runner
+- [x] Crear tabla `task-scheduler-logs` con índices apropiados
+- [x] Crear tabla `cost-center-permissions` para validación
+- [x] Configurar IAM roles para acceso desde EKS
+- [x] Poblar tabla de permisos con centros de costo iniciales
+- [x] Probar conectividad desde kubectl-runner
 
 ### 1.4 Arreglar RBAC de Kubernetes
-- [ ] Revisar y actualizar ClusterRole para kubectl-runner
-- [ ] Agregar permisos para scale de deployments/statefulsets
-- [ ] Configurar ServiceAccount correctamente
-- [ ] Probar permisos con comandos kubectl
-- [ ] Documentar permisos mínimos requeridos
+- [x] Revisar y actualizar ClusterRole para kubectl-runner
+- [x] Agregar permisos para scale de deployments/statefulsets
+- [x] Configurar ServiceAccount correctamente
+- [x] Probar permisos con comandos kubectl
+- [x] Documentar permisos mínimos requeridos
 
 ## 2. Backend - Correcciones y Mejoras
 
-### 2.1 Completar validación de centros de costo
-- [ ] Implementar endpoint para validar centro de costo
-- [ ] Agregar validación en activación/desactivación de namespaces
-- [ ] Agregar validación en creación de tareas programadas
-- [ ] Implementar cache de permisos para mejor performance
-- [ ] Agregar logs de auditoría para validaciones
+### 2.1 Completar validación de centros de costo y auditoría
+- [x] Implementar endpoint para validar centro de costo
+- [x] Agregar validación en activación de namespaces
+- [x] Agregar validación en desactivación de namespaces
+- [x] Agregar validación en creación de tareas programadas
+- [x] Implementar cache de permisos para mejor performance
+- [x] Agregar logs de auditoría para validaciones
+- [x] Implementar captura de usuario solicitante en todas las operaciones
+- [x] Implementar captura de cluster name en todas las operaciones
+- [x] Agregar endpoints para consultas de auditoría por usuario y cluster
 
 ### 2.2 Arreglar gestión de namespaces
-- [ ] Corregir lógica de conteo de namespaces activos
-- [ ] Implementar detección correcta de horarios no laborales
-- [ ] Arreglar escalado de recursos (deployments, statefulsets)
-- [ ] Agregar manejo de errores robusto
-- [ ] Implementar rollback en caso de fallas
+- [x] Corregir lógica de conteo de namespaces activos
+- [x] Implementar detección correcta de horarios no laborales
+- [x] Arreglar escalado de recursos (deployments, statefulsets)
+- [x] Agregar manejo de errores robusto
+- [x] Implementar rollback en caso de fallas
 
 ### 2.3 Completar sistema de tareas programadas
-- [ ] Arreglar cálculo de próxima ejecución con croniter
-- [ ] Implementar ejecución de tareas en background threads
-- [ ] Agregar manejo de timeouts y reintentos
-- [ ] Implementar persistencia de estado de tareas
-- [ ] Agregar logs detallados de ejecución
+- [x] Arreglar cálculo de próxima ejecución con croniter
+- [x] Implementar ejecución de tareas en background threads
+- [x] Agregar manejo de timeouts y reintentos
+- [x] Implementar persistencia de estado de tareas
+- [x] Agregar logs detallados de ejecución
 
 ## 3. Frontend - Correcciones y Mejoras
 
 ### 3.1 Arreglar conexión con Backend
-- [ ] Corregir llamadas API que fallan (fetch errors)
-- [ ] Implementar manejo de errores en todas las llamadas
-- [ ] Agregar indicadores de carga (loading spinners)
-- [ ] Implementar retry automático para llamadas fallidas
-- [ ] Agregar validación de respuestas del servidor
+- [x] Corregir llamadas API que fallan (fetch errors)
+- [x] Implementar manejo de errores en todas las llamadas
+- [x] Agregar indicadores de carga (loading spinners)
+- [x] Implementar retry automático para llamadas fallidas
+- [x] Agregar validación de respuestas del servidor
 
 ### 3.2 Completar interfaz de gestión de namespaces
-- [ ] Arreglar carga de lista de namespaces
-- [ ] Implementar actualización en tiempo real del estado
-- [ ] Agregar validación de centro de costo antes de operaciones
-- [ ] Mejorar feedback visual de operaciones exitosas/fallidas
-- [ ] Implementar confirmación para operaciones críticas
+- [x] Arreglar carga de lista de namespaces
+- [x] Agregar estados de carga y error en selectores de namespaces
+- [x] Implementar actualización en tiempo real del estado
+- [x] Agregar validación de centro de costo antes de operaciones
+- [x] Mejorar feedback visual de operaciones exitosas/fallidas
+- [x] Implementar confirmación para operaciones críticas
+  - [x] Modal de confirmación para activación de namespaces
+  - [x] Modal de advertencia para desactivación de namespaces
+  - [x] Integración con Bootstrap Modal
+  - [x] Manejo de eventos de confirmación/cancelación
 
 ### 3.3 Completar interfaz de programación de tareas
-- [ ] Arreglar integración con FullCalendar
-- [ ] Implementar formulario completo de creación de tareas
-- [ ] Agregar validación de expresiones cron
-- [ ] Implementar edición y eliminación de tareas
-- [ ] Agregar vista de historial de ejecuciones
+- [x] Arreglar integración con FullCalendar
+- [x] Implementar carga de tareas con formateo consistente
+- [x] Agregar código de colores por estado de tarea
+- [x] Implementar formulario completo de creación de tareas
+- [x] Agregar validación de expresiones cron
+- [x] Implementar edición y eliminación de tareas
+- [x] Agregar vista de historial de ejecuciones
 
-### 3.4 Mejorar dashboard y monitoreo
+### 3.4 Mejorar dashboard y monitoreo con capacidades de auditoría
 - [ ] Arreglar cálculo de estadísticas en tiempo real
 - [ ] Implementar gráficos de uso de namespaces
 - [ ] Agregar alertas visuales para límites excedidos
-- [ ] Implementar filtros en logs por fecha y centro de costo
-- [ ] Agregar exportación de reportes
+- [ ] Implementar filtros en logs por fecha, centro de costo, cluster y usuario
+- [ ] Agregar exportación de reportes de auditoría
+- [ ] Implementar vista de actividad por usuario solicitante
+- [ ] Implementar vista de actividad por cluster
+- [ ] Agregar reportes de trazabilidad de operaciones
 
 ## 4. Despliegue y CI/CD
 

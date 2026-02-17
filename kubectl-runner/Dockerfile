@@ -38,7 +38,9 @@ RUN pip3 install --no-cache-dir \
     croniter==1.4.1 \
     pyyaml==6.0.1 \
     requests==2.31.0 \
-    python-dateutil==2.8.2
+    python-dateutil==2.8.2 \
+    pytz==2023.3 \
+    holidays==0.34
 
 # Create app directory
 WORKDIR /app

@@ -8,37 +8,190 @@ Version: 2.0.0 - Added DynamoDB integration for task scheduling
 import os
 import json
 import logging
+import logging.handlers
 import subprocess
 import threading
 import time
 from datetime import datetime, timedelta
-from flask import Flask, request, jsonify, Response
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+from flask import Flask, request, jsonify, Response, g
 from flask_cors import CORS
 from croniter import croniter
 import yaml
 import boto3
 from botocore.exceptions import ClientError
 import uuid
+import traceback
+
+# Configure structured logging
+class StructuredFormatter(logging.Formatter):
+    """Custom formatter for structured JSON logging"""
+    
+    def format(self, record):
+        log_data = {
+            'timestamp': datetime.utcnow().isoformat() + 'Z',
+            'level': record.levelname,
+            'logger': record.name,
+            'message': record.getMessage(),
+            'module': record.module,
+            'function': record.funcName,
+            'line': record.lineno
+        }
+        
+        # Add exception info if present
+        if record.exc_info:
+            log_data['exception'] = self.formatException(record.exc_info)
+        
+        # Add extra fields if present
+        if hasattr(record, 'request_id'):
+            log_data['request_id'] = record.request_id
+        if hasattr(record, 'user_id'):
+            log_data['user_id'] = record.user_id
+        if hasattr(record, 'task_id'):
+            log_data['task_id'] = record.task_id
+        if hasattr(record, 'namespace'):
+            log_data['namespace'] = record.namespace
+        if hasattr(record, 'cost_center'):
+            log_data['cost_center'] = record.cost_center
+        if hasattr(record, 'duration_ms'):
+            log_data['duration_ms'] = record.duration_ms
+        if hasattr(record, 'operation'):
+            log_data['operation'] = record.operation
+        
+        return json.dumps(log_data)
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('/app/logs/app.log'),
-        logging.StreamHandler()
-    ]
-)
+log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
+log_format = os.getenv('LOG_FORMAT', 'json')  # 'json' or 'text'
+log_file = os.getenv('LOG_FILE', '/app/logs/app.log')
+
+# Create logs directory
+os.makedirs(os.path.dirname(log_file), exist_ok=True)
+
+# Configure root logger
 logger = logging.getLogger(__name__)
+logger.setLevel(getattr(logging, log_level, logging.INFO))
+
+# File handler with rotation
+file_handler = logging.handlers.RotatingFileHandler(
+    log_file,
+    maxBytes=10 * 1024 * 1024,  # 10 MB
+    backupCount=5
+)
+
+# Console handler
+console_handler = logging.StreamHandler()
+
+# Set formatters based on configuration
+if log_format == 'json':
+    formatter = StructuredFormatter()
+else:
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+
+file_handler.setFormatter(formatter)
+console_handler.setFormatter(formatter)
+
+logger.addHandler(file_handler)
+logger.addHandler(console_handler)
 
 app = Flask(__name__)
 CORS(app)
+
+# Request logging middleware
+@app.before_request
+def before_request():
+    """Add request_id and log incoming requests"""
+    g.request_id = request.headers.get('X-Request-ID', str(uuid.uuid4()))
+    g.start_time = time.time()
+    
+    logger.info(
+        f"Incoming request: {request.method} {request.path}",
+        extra={
+            'request_id': g.request_id,
+            'operation': f"{request.method} {request.path}",
+            'remote_addr': request.remote_addr,
+            'user_agent': request.headers.get('User-Agent', 'unknown')
+        }
+    )
+
+@app.after_request
+def after_request(response):
+    """Log request completion with duration"""
+    if hasattr(g, 'start_time'):
+        duration_ms = int((time.time() - g.start_time) * 1000)
+        
+        logger.info(
+            f"Request completed: {request.method} {request.path} - {response.status_code}",
+            extra={
+                'request_id': g.request_id if hasattr(g, 'request_id') else 'unknown',
+                'operation': f"{request.method} {request.path}",
+                'status_code': response.status_code,
+                'duration_ms': duration_ms
+            }
+        )
+        
+        # Add request_id to response headers
+        if hasattr(g, 'request_id'):
+            response.headers['X-Request-ID'] = g.request_id
+    
+    return response
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    """Log unhandled exceptions"""
+    logger.error(
+        f"Unhandled exception: {str(e)}",
+        extra={
+            'request_id': g.request_id if hasattr(g, 'request_id') else 'unknown',
+            'operation': f"{request.method} {request.path}",
+            'exception': traceback.format_exc()
+        },
+        exc_info=True
+    )
+    
+    return jsonify({
+        'error': 'Internal server error',
+        'request_id': g.request_id if hasattr(g, 'request_id') else 'unknown'
+    }), 500
+
+# Helper function for contextual logging
+def log_with_context(level, message, **context):
+    """
+    Log a message with additional context
+    
+    Args:
+        level: Log level ('debug', 'info', 'warning', 'error', 'critical')
+        message: Log message
+        **context: Additional context fields (task_id, namespace, cost_center, etc.)
+    """
+    extra = {}
+    
+    # Add request_id if available
+    if hasattr(g, 'request_id'):
+        extra['request_id'] = g.request_id
+    
+    # Add custom context
+    extra.update(context)
+    
+    # Get logger method
+    log_method = getattr(logger, level.lower(), logger.info)
+    log_method(message, extra=extra)
+
+
 
 class DynamoDBManager:
     def __init__(self):
         self.dynamodb = boto3.resource('dynamodb', region_name=os.getenv('AWS_REGION', 'us-east-1'))
         self.table_name = os.getenv('DYNAMODB_TABLE_NAME', 'task-scheduler-logs')
         self.permissions_table_name = os.getenv('PERMISSIONS_TABLE_NAME', 'cost-center-permissions')
+        
+        # Permissions cache configuration
+        self.permissions_cache = {}  # {cost_center: {'data': {...}, 'timestamp': float}}
+        self.cache_ttl = int(os.getenv('PERMISSIONS_CACHE_TTL', '300'))  # Default 5 minutes
+        self.cache_enabled = os.getenv('PERMISSIONS_CACHE_ENABLED', 'true').lower() == 'true'
+        
         self.ensure_tables_exist()
 
     def ensure_tables_exist(self):
@@ -61,13 +214,33 @@ class DynamoDBManager:
                         AttributeDefinitions=[
                             {'AttributeName': 'namespace_name', 'AttributeType': 'S'},
                             {'AttributeName': 'timestamp_start', 'AttributeType': 'N'},
-                            {'AttributeName': 'cost_center', 'AttributeType': 'S'}
+                            {'AttributeName': 'cost_center', 'AttributeType': 'S'},
+                            {'AttributeName': 'requested_by', 'AttributeType': 'S'},
+                            {'AttributeName': 'cluster_name', 'AttributeType': 'S'}
                         ],
                         GlobalSecondaryIndexes=[
                             {
                                 'IndexName': 'cost-center-index',
                                 'KeySchema': [
                                     {'AttributeName': 'cost_center', 'KeyType': 'HASH'},
+                                    {'AttributeName': 'timestamp_start', 'KeyType': 'RANGE'}
+                                ],
+                                'Projection': {'ProjectionType': 'ALL'},
+                                'BillingMode': 'PAY_PER_REQUEST'
+                            },
+                            {
+                                'IndexName': 'requested-by-timestamp-index',
+                                'KeySchema': [
+                                    {'AttributeName': 'requested_by', 'KeyType': 'HASH'},
+                                    {'AttributeName': 'timestamp_start', 'KeyType': 'RANGE'}
+                                ],
+                                'Projection': {'ProjectionType': 'ALL'},
+                                'BillingMode': 'PAY_PER_REQUEST'
+                            },
+                            {
+                                'IndexName': 'cluster-timestamp-index',
+                                'KeySchema': [
+                                    {'AttributeName': 'cluster_name', 'KeyType': 'HASH'},
                                     {'AttributeName': 'timestamp_start', 'KeyType': 'RANGE'}
                                 ],
                                 'Projection': {'ProjectionType': 'ALL'},
@@ -104,8 +277,8 @@ class DynamoDBManager:
             logger.error(f"Error ensuring tables exist: {e}")
             raise
 
-    def log_namespace_activity(self, namespace_name, operation_type, cost_center, user_id=None, **kwargs):
-        """Log namespace activity to DynamoDB"""
+    def log_namespace_activity(self, namespace_name, operation_type, cost_center, user_id=None, requested_by=None, cluster_name=None, **kwargs):
+        """Log namespace activity to DynamoDB with user and cluster tracking"""
         try:
             timestamp_start = int(time.time())
             item = {
@@ -118,14 +291,31 @@ class DynamoDBManager:
                 'id': str(uuid.uuid4())
             }
             
-            if user_id:
+            # Capture user information - requested_by is the primary field for user tracking
+            # user_id is kept for backward compatibility
+            if requested_by:
+                item['requested_by'] = requested_by
+                item['user_id'] = requested_by  # Also set user_id for consistency
+            elif user_id:
                 item['user_id'] = user_id
+                item['requested_by'] = user_id  # Set requested_by from user_id
+            else:
+                # Default to 'system' if no user provided
+                item['requested_by'] = 'system'
+                item['user_id'] = 'system'
+            
+            # Capture cluster information
+            if cluster_name:
+                item['cluster_name'] = cluster_name
+            else:
+                # Default to environment variable or 'unknown-cluster'
+                item['cluster_name'] = os.getenv('EKS_CLUSTER_NAME', 'unknown-cluster')
             
             # Add any additional fields
             item.update(kwargs)
             
             self.table.put_item(Item=item)
-            logger.info(f"Logged activity for namespace {namespace_name}: {operation_type}")
+            logger.info(f"Logged activity for namespace {namespace_name}: {operation_type} by {item['requested_by']} on cluster {item['cluster_name']}")
             return item
             
         except Exception as e:
@@ -194,22 +384,264 @@ class DynamoDBManager:
             logger.error(f"Error getting activities by cost center: {e}")
             return []
 
-    def validate_cost_center_permissions(self, cost_center):
-        """Validate if cost center has permissions"""
+    def get_activities_by_user(self, requested_by, start_date=None, end_date=None, limit=100):
+        """Get activities by user (requested_by) and date range"""
         try:
+            query_kwargs = {
+                'IndexName': 'requested-by-timestamp-index',
+                'KeyConditionExpression': 'requested_by = :user',
+                'ExpressionAttributeValues': {':user': requested_by},
+                'Limit': limit,
+                'ScanIndexForward': False  # Sort by timestamp descending (newest first)
+            }
+            
+            if start_date and end_date:
+                start_timestamp = int(start_date.timestamp())
+                end_timestamp = int(end_date.timestamp())
+                query_kwargs['KeyConditionExpression'] += ' AND timestamp_start BETWEEN :start AND :end'
+                query_kwargs['ExpressionAttributeValues'].update({
+                    ':start': start_timestamp,
+                    ':end': end_timestamp
+                })
+            elif start_date:
+                start_timestamp = int(start_date.timestamp())
+                query_kwargs['KeyConditionExpression'] += ' AND timestamp_start >= :start'
+                query_kwargs['ExpressionAttributeValues'].update({
+                    ':start': start_timestamp
+                })
+            elif end_date:
+                end_timestamp = int(end_date.timestamp())
+                query_kwargs['KeyConditionExpression'] += ' AND timestamp_start <= :end'
+                query_kwargs['ExpressionAttributeValues'].update({
+                    ':end': end_timestamp
+                })
+            
+            response = self.table.query(**query_kwargs)
+            return response['Items']
+            
+        except Exception as e:
+            logger.error(f"Error getting activities by user: {e}")
+            return []
+
+    def get_activities_by_cluster(self, cluster_name, start_date=None, end_date=None, limit=100):
+        """Get activities by cluster and date range"""
+        try:
+            query_kwargs = {
+                'IndexName': 'cluster-timestamp-index',
+                'KeyConditionExpression': 'cluster_name = :cluster',
+                'ExpressionAttributeValues': {':cluster': cluster_name},
+                'Limit': limit,
+                'ScanIndexForward': False  # Sort by timestamp descending (newest first)
+            }
+            
+            if start_date and end_date:
+                start_timestamp = int(start_date.timestamp())
+                end_timestamp = int(end_date.timestamp())
+                query_kwargs['KeyConditionExpression'] += ' AND timestamp_start BETWEEN :start AND :end'
+                query_kwargs['ExpressionAttributeValues'].update({
+                    ':start': start_timestamp,
+                    ':end': end_timestamp
+                })
+            elif start_date:
+                start_timestamp = int(start_date.timestamp())
+                query_kwargs['KeyConditionExpression'] += ' AND timestamp_start >= :start'
+                query_kwargs['ExpressionAttributeValues'].update({
+                    ':start': start_timestamp
+                })
+            elif end_date:
+                end_timestamp = int(end_date.timestamp())
+                query_kwargs['KeyConditionExpression'] += ' AND timestamp_start <= :end'
+                query_kwargs['ExpressionAttributeValues'].update({
+                    ':end': end_timestamp
+                })
+            
+            response = self.table.query(**query_kwargs)
+            return response['Items']
+            
+        except Exception as e:
+            logger.error(f"Error getting activities by cluster: {e}")
+            return []
+
+    def validate_cost_center_permissions(self, cost_center, user_id=None, requested_by=None, operation_type=None, namespace=None, cluster_name=None):
+        """Validate if cost center has permissions (with caching and audit logging)"""
+        validation_result = False
+        validation_source = 'unknown'
+        error_message = None
+        
+        # Determine the user for logging
+        user_for_logging = requested_by or user_id
+        
+        try:
+            # Check cache first if enabled
+            if self.cache_enabled:
+                cached_data = self._get_from_cache(cost_center)
+                if cached_data is not None:
+                    logger.debug(f"Cache hit for cost center {cost_center}")
+                    validation_result = cached_data.get('is_authorized', False)
+                    validation_source = 'cache'
+                    
+                    # Log validation audit event
+                    self._log_validation_audit(
+                        validation_type='cost_center_permission',
+                        cost_center=cost_center,
+                        user_id=user_id,
+                        requested_by=requested_by,
+                        operation_type=operation_type,
+                        namespace=namespace,
+                        cluster_name=cluster_name,
+                        validation_result=validation_result,
+                        validation_source=validation_source
+                    )
+                    
+                    return validation_result
+            
+            # Cache miss or disabled - fetch from DynamoDB
+            logger.debug(f"Cache miss for cost center {cost_center}, fetching from DynamoDB")
             response = self.permissions_table.get_item(
                 Key={'cost_center': cost_center}
             )
             
             if 'Item' in response:
-                return response['Item'].get('is_authorized', False)
+                # Store in cache
+                if self.cache_enabled:
+                    self._put_in_cache(cost_center, response['Item'])
+                validation_result = response['Item'].get('is_authorized', False)
+                validation_source = 'dynamodb'
             else:
-                # If not found, deny by default
-                return False
+                # If not found, cache the negative result to avoid repeated lookups
+                if self.cache_enabled:
+                    self._put_in_cache(cost_center, {'is_authorized': False, 'not_found': True})
+                validation_result = False
+                validation_source = 'dynamodb'
+                error_message = 'Cost center not found'
+            
+            # Log validation audit event
+            self._log_validation_audit(
+                validation_type='cost_center_permission',
+                cost_center=cost_center,
+                user_id=user_id,
+                requested_by=requested_by,
+                operation_type=operation_type,
+                namespace=namespace,
+                cluster_name=cluster_name,
+                validation_result=validation_result,
+                validation_source=validation_source,
+                error_message=error_message
+            )
+            
+            return validation_result
                 
         except Exception as e:
             logger.error(f"Error validating cost center permissions: {e}")
+            error_message = str(e)
+            
+            # Log validation failure audit event
+            self._log_validation_audit(
+                validation_type='cost_center_permission',
+                cost_center=cost_center,
+                user_id=user_id,
+                requested_by=requested_by,
+                operation_type=operation_type,
+                namespace=namespace,
+                cluster_name=cluster_name,
+                validation_result=False,
+                validation_source='error',
+                error_message=error_message
+            )
+            
             return False
+
+    def _get_from_cache(self, cost_center):
+        """Get cost center permissions from cache"""
+        if cost_center in self.permissions_cache:
+            cache_entry = self.permissions_cache[cost_center]
+            # Check if cache entry is still valid
+            if time.time() - cache_entry['timestamp'] < self.cache_ttl:
+                return cache_entry['data']
+            else:
+                # Cache expired, remove it
+                logger.debug(f"Cache expired for cost center {cost_center}")
+                del self.permissions_cache[cost_center]
+        return None
+
+    def _put_in_cache(self, cost_center, data):
+        """Put cost center permissions in cache"""
+        self.permissions_cache[cost_center] = {
+            'data': data,
+            'timestamp': time.time()
+        }
+        logger.debug(f"Cached permissions for cost center {cost_center}")
+
+    def _log_validation_audit(self, validation_type, cost_center, validation_result, 
+                              validation_source, user_id=None, requested_by=None, operation_type=None, 
+                              namespace=None, cluster_name=None, error_message=None, **kwargs):
+        """Log validation audit events to DynamoDB with user and cluster tracking"""
+        try:
+            timestamp = int(time.time())
+            audit_item = {
+                'namespace_name': namespace or 'N/A',
+                'timestamp_start': timestamp,
+                'operation_type': f'validation_{validation_type}',
+                'cost_center': cost_center,
+                'validation_result': 'success' if validation_result else 'failure',
+                'validation_source': validation_source,
+                'status': 'completed',
+                'created_at': datetime.now().isoformat(),
+                'id': str(uuid.uuid4())
+            }
+            
+            # Capture user information - requested_by is the primary field
+            if requested_by:
+                audit_item['requested_by'] = requested_by
+                audit_item['user_id'] = requested_by
+            elif user_id:
+                audit_item['user_id'] = user_id
+                audit_item['requested_by'] = user_id
+            else:
+                audit_item['requested_by'] = 'system'
+                audit_item['user_id'] = 'system'
+            
+            # Capture cluster information
+            if cluster_name:
+                audit_item['cluster_name'] = cluster_name
+            else:
+                # Default to environment variable or 'unknown-cluster'
+                audit_item['cluster_name'] = os.getenv('EKS_CLUSTER_NAME', 'unknown-cluster')
+            
+            if operation_type:
+                audit_item['requested_operation'] = operation_type
+            
+            if error_message:
+                audit_item['error_message'] = error_message
+            
+            # Add any additional fields
+            audit_item.update(kwargs)
+            
+            self.table.put_item(Item=audit_item)
+            logger.info(f"Logged validation audit: {validation_type} for {cost_center} by {audit_item['requested_by']} on cluster {audit_item['cluster_name']} - Result: {validation_result}")
+            
+        except Exception as e:
+            # Don't fail the validation if audit logging fails
+            logger.error(f"Error logging validation audit: {e}")
+
+    def invalidate_cache(self, cost_center=None):
+        """Invalidate cache for a specific cost center or all cache"""
+        if cost_center:
+            if cost_center in self.permissions_cache:
+                del self.permissions_cache[cost_center]
+                logger.info(f"Invalidated cache for cost center {cost_center}")
+        else:
+            self.permissions_cache.clear()
+            logger.info("Invalidated all permissions cache")
+
+    def get_cache_stats(self):
+        """Get cache statistics"""
+        return {
+            'enabled': self.cache_enabled,
+            'ttl_seconds': self.cache_ttl,
+            'cached_entries': len(self.permissions_cache),
+            'entries': list(self.permissions_cache.keys())
+        }
 
     def set_cost_center_permissions(self, cost_center, is_authorized, max_concurrent_namespaces=5, authorized_namespaces=None):
         """Set permissions for a cost center"""
@@ -224,6 +656,10 @@ class DynamoDBManager:
             }
             
             self.permissions_table.put_item(Item=item)
+            
+            # Invalidate cache for this cost center
+            self.invalidate_cache(cost_center)
+            
             logger.info(f"Set permissions for cost center {cost_center}: {is_authorized}")
             
         except Exception as e:
@@ -235,178 +671,1402 @@ class TaskScheduler:
         self.tasks = {}
         self.running_tasks = {}
         self.task_history = []
-        self.active_namespaces_count = 0
+        # Remove manual counter - we'll calculate it dynamically
         self.dynamodb_manager = DynamoDBManager()
+        self.cluster_name = os.getenv('EKS_CLUSTER_NAME', 'unknown-cluster')  # Capture cluster name
+        
+        # Thread pool configuration
+        self.max_workers = int(os.getenv('MAX_TASK_WORKERS', '5'))
+        self.executor = ThreadPoolExecutor(max_workers=self.max_workers, thread_name_prefix='task-worker')
+        
+        # Task execution configuration
+        self.task_timeout = int(os.getenv('TASK_TIMEOUT_SECONDS', '300'))  # 5 minutes default
+        self.max_retries = int(os.getenv('TASK_MAX_RETRIES', '3'))
+        self.retry_delay = int(os.getenv('TASK_RETRY_DELAY_SECONDS', '10'))
+        
+        # Task execution tracking
+        self.task_futures = {}  # Maps task_id to Future object
+        self.task_locks = {}  # Maps task_id to Lock for thread-safe operations
+        
+        # Persistence configuration
+        self.auto_save_enabled = os.getenv('AUTO_SAVE_ENABLED', 'true').lower() == 'true'
+        self.auto_save_interval = int(os.getenv('AUTO_SAVE_INTERVAL_SECONDS', '300'))  # 5 minutes default
+        
         self.load_tasks()
         self.start_scheduler()
+        
+        # Start auto-save if enabled
+        if self.auto_save_enabled:
+            self.start_auto_save(self.auto_save_interval)
+        
+        logger.info(f"TaskScheduler initialized with {self.max_workers} workers, "
+                   f"{self.task_timeout}s timeout, {self.max_retries} max retries, "
+                   f"auto-save: {self.auto_save_enabled}")
+
+    def get_active_namespaces_count(self):
+        """Get the actual count of active namespaces by querying Kubernetes"""
+        try:
+            # Get all namespaces
+            result = self.execute_kubectl_command('get namespaces -o json')
+            if not result['success']:
+                logger.error(f"Failed to get namespaces: {result['stderr']}")
+                return 0
+            
+            namespaces_data = json.loads(result['stdout'])
+            active_count = 0
+            
+            for item in namespaces_data['items']:
+                namespace_name = item['metadata']['name']
+                
+                # Skip system namespaces
+                if self.is_system_namespace(namespace_name):
+                    continue
+                
+                # Check if namespace has active resources (running pods)
+                if self.is_namespace_active(namespace_name):
+                    active_count += 1
+            
+            return active_count
+            
+        except Exception as e:
+            logger.error(f"Error getting active namespaces count: {e}")
+            return 0
+
+    def is_system_namespace(self, namespace_name):
+        """Check if a namespace is a system namespace that should be excluded from counts"""
+        system_namespaces = [
+            'kube-system', 
+            'kube-public', 
+            'kube-node-lease', 
+            'default',
+            'kube-apiserver',
+            'kube-controller-manager',
+            'kube-scheduler',
+            'kube-proxy',
+            'coredns',
+            'calico-system',
+            'tigera-operator',
+            'amazon-cloudwatch',
+            'aws-node',
+            'cert-manager',
+            'ingress-nginx',
+            'monitoring',
+            'logging',
+            'argocd',
+            'task-scheduler'  # Our own namespace
+        ]
+        return namespace_name in system_namespaces
+
+    def is_namespace_active(self, namespace_name):
+        """Check if a namespace is active (has running pods or scaled deployments)"""
+        try:
+            # Method 1: Check for running pods
+            pods_result = self.execute_kubectl_command(
+                f'get pods -n {namespace_name} --field-selector=status.phase=Running -o json'
+            )
+            
+            if pods_result['success']:
+                pods_data = json.loads(pods_result['stdout'])
+                if len(pods_data.get('items', [])) > 0:
+                    return True
+            
+            # Method 2: Check for deployments with replicas > 0
+            deployments_result = self.execute_kubectl_command(
+                f'get deployments -n {namespace_name} -o json'
+            )
+            
+            if deployments_result['success']:
+                deployments_data = json.loads(deployments_result['stdout'])
+                for deployment in deployments_data.get('items', []):
+                    replicas = deployment.get('spec', {}).get('replicas', 0)
+                    if replicas > 0:
+                        return True
+            
+            # Method 3: Check for statefulsets with replicas > 0
+            statefulsets_result = self.execute_kubectl_command(
+                f'get statefulsets -n {namespace_name} -o json'
+            )
+            
+            if statefulsets_result['success']:
+                statefulsets_data = json.loads(statefulsets_result['stdout'])
+                for statefulset in statefulsets_data.get('items', []):
+                    replicas = statefulset.get('spec', {}).get('replicas', 0)
+                    if replicas > 0:
+                        return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error checking if namespace {namespace_name} is active: {e}")
+            return False
+
+    def get_namespace_details(self, namespace_name):
+        """Get detailed information about a namespace's active resources"""
+        try:
+            details = {
+                'name': namespace_name,
+                'is_active': False,
+                'is_system': self.is_system_namespace(namespace_name),
+                'active_pods': 0,
+                'deployments': [],
+                'statefulsets': [],
+                'daemonsets': []
+            }
+            
+            # Get running pods count
+            pods_result = self.execute_kubectl_command(
+                f'get pods -n {namespace_name} --field-selector=status.phase=Running -o json'
+            )
+            
+            if pods_result['success']:
+                pods_data = json.loads(pods_result['stdout'])
+                details['active_pods'] = len(pods_data.get('items', []))
+            
+            # Get deployments info
+            deployments_result = self.execute_kubectl_command(
+                f'get deployments -n {namespace_name} -o json'
+            )
+            
+            if deployments_result['success']:
+                deployments_data = json.loads(deployments_result['stdout'])
+                for deployment in deployments_data.get('items', []):
+                    name = deployment['metadata']['name']
+                    replicas = deployment.get('spec', {}).get('replicas', 0)
+                    ready_replicas = deployment.get('status', {}).get('readyReplicas', 0)
+                    details['deployments'].append({
+                        'name': name,
+                        'replicas': replicas,
+                        'ready_replicas': ready_replicas
+                    })
+            
+            # Get statefulsets info
+            statefulsets_result = self.execute_kubectl_command(
+                f'get statefulsets -n {namespace_name} -o json'
+            )
+            
+            if statefulsets_result['success']:
+                statefulsets_data = json.loads(statefulsets_result['stdout'])
+                for statefulset in statefulsets_data.get('items', []):
+                    name = statefulset['metadata']['name']
+                    replicas = statefulset.get('spec', {}).get('replicas', 0)
+                    ready_replicas = statefulset.get('status', {}).get('readyReplicas', 0)
+                    details['statefulsets'].append({
+                        'name': name,
+                        'replicas': replicas,
+                        'ready_replicas': ready_replicas
+                    })
+            
+            # Get daemonsets info
+            daemonsets_result = self.execute_kubectl_command(
+                f'get daemonsets -n {namespace_name} -o json'
+            )
+            
+            if daemonsets_result['success']:
+                daemonsets_data = json.loads(daemonsets_result['stdout'])
+                for daemonset in daemonsets_data.get('items', []):
+                    name = daemonset['metadata']['name']
+                    desired = daemonset.get('status', {}).get('desiredNumberScheduled', 0)
+                    ready = daemonset.get('status', {}).get('numberReady', 0)
+                    details['daemonsets'].append({
+                        'name': name,
+                        'desired': desired,
+                        'ready': ready
+                    })
+            
+            # Determine if namespace is active
+            details['is_active'] = self.is_namespace_active(namespace_name)
+            
+            return details
+            
+        except Exception as e:
+            logger.error(f"Error getting namespace details for {namespace_name}: {e}")
+            return {
+                'name': namespace_name,
+                'is_active': False,
+                'is_system': self.is_system_namespace(namespace_name),
+                'active_pods': 0,
+                'deployments': [],
+                'statefulsets': [],
+                'daemonsets': [],
+                'error': str(e)
+            }
 
     def load_tasks(self):
-        """Load tasks from file"""
+        """Load tasks from file with validation and error recovery"""
         try:
-            if os.path.exists('/app/config/tasks.json'):
-                with open('/app/config/tasks.json', 'r') as f:
-                    self.tasks = json.load(f)
-                logger.info(f"Loaded {len(self.tasks)} tasks")
+            tasks_file = '/app/config/tasks.json'
+            backup_file = '/app/config/tasks.json.backup'
+            
+            # Try to load from main file
+            if os.path.exists(tasks_file):
+                try:
+                    with open(tasks_file, 'r') as f:
+                        loaded_tasks = json.load(f)
+                    
+                    # Validate loaded tasks
+                    if self._validate_tasks(loaded_tasks):
+                        self.tasks = loaded_tasks
+                        logger.info(f"Loaded {len(self.tasks)} tasks from {tasks_file}")
+                        return
+                    else:
+                        logger.warning(f"Tasks file {tasks_file} failed validation, trying backup")
+                
+                except json.JSONDecodeError as e:
+                    logger.error(f"JSON decode error in {tasks_file}: {e}, trying backup")
+                except Exception as e:
+                    logger.error(f"Error loading tasks from {tasks_file}: {e}, trying backup")
+            
+            # Try to load from backup if main file failed
+            if os.path.exists(backup_file):
+                try:
+                    with open(backup_file, 'r') as f:
+                        loaded_tasks = json.load(f)
+                    
+                    if self._validate_tasks(loaded_tasks):
+                        self.tasks = loaded_tasks
+                        logger.info(f"Loaded {len(self.tasks)} tasks from backup {backup_file}")
+                        # Restore main file from backup
+                        self.save_tasks()
+                        return
+                    else:
+                        logger.error(f"Backup file {backup_file} also failed validation")
+                
+                except Exception as e:
+                    logger.error(f"Error loading tasks from backup {backup_file}: {e}")
+            
+            # If both failed, start with empty tasks
+            logger.warning("Could not load tasks from file or backup, starting with empty task list")
+            self.tasks = {}
+            
         except Exception as e:
-            logger.error(f"Error loading tasks: {e}")
+            logger.error(f"Critical error loading tasks: {e}")
+            self.tasks = {}
+
+    def _validate_tasks(self, tasks):
+        """Validate tasks data structure"""
+        try:
+            if not isinstance(tasks, dict):
+                logger.error("Tasks must be a dictionary")
+                return False
+            
+            # Validate each task
+            for task_id, task in tasks.items():
+                if not isinstance(task, dict):
+                    logger.error(f"Task {task_id} is not a dictionary")
+                    return False
+                
+                # Check required fields
+                required_fields = ['title', 'status']
+                for field in required_fields:
+                    if field not in task:
+                        logger.error(f"Task {task_id} missing required field: {field}")
+                        return False
+                
+                # Validate status values
+                valid_statuses = ['pending', 'running', 'completed', 'failed', 'cancelled']
+                if task.get('status') not in valid_statuses:
+                    logger.warning(f"Task {task_id} has invalid status: {task.get('status')}, setting to pending")
+                    task['status'] = 'pending'
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error validating tasks: {e}")
+            return False
 
     def save_tasks(self):
-        """Save tasks to file"""
+        """Save tasks to file with atomic write and backup"""
         try:
             os.makedirs('/app/config', exist_ok=True)
-            with open('/app/config/tasks.json', 'w') as f:
-                json.dump(self.tasks, f, indent=2)
+            
+            tasks_file = '/app/config/tasks.json'
+            temp_file = '/app/config/tasks.json.tmp'
+            backup_file = '/app/config/tasks.json.backup'
+            
+            # Create backup of existing file
+            if os.path.exists(tasks_file):
+                try:
+                    import shutil
+                    shutil.copy2(tasks_file, backup_file)
+                    logger.debug(f"Created backup: {backup_file}")
+                except Exception as e:
+                    logger.warning(f"Could not create backup: {e}")
+            
+            # Write to temporary file first (atomic write)
+            with open(temp_file, 'w') as f:
+                json.dump(self.tasks, f, indent=2, sort_keys=True)
+            
+            # Verify the temporary file is valid JSON
+            with open(temp_file, 'r') as f:
+                json.load(f)
+            
+            # Rename temporary file to actual file (atomic operation)
+            os.replace(temp_file, tasks_file)
+            
+            logger.debug(f"Saved {len(self.tasks)} tasks to {tasks_file}")
+            
         except Exception as e:
             logger.error(f"Error saving tasks: {e}")
+            # Clean up temporary file if it exists
+            if os.path.exists('/app/config/tasks.json.tmp'):
+                try:
+                    os.remove('/app/config/tasks.json.tmp')
+                except:
+                    pass
+
+    def export_tasks(self, export_path=None):
+        """Export tasks to a file with metadata"""
+        try:
+            if export_path is None:
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                export_path = f'/app/config/tasks_export_{timestamp}.json'
+            
+            export_data = {
+                'version': '1.0',
+                'exported_at': datetime.now().isoformat(),
+                'task_count': len(self.tasks),
+                'cluster_name': self.cluster_name,
+                'tasks': self.tasks
+            }
+            
+            os.makedirs(os.path.dirname(export_path), exist_ok=True)
+            
+            with open(export_path, 'w') as f:
+                json.dump(export_data, f, indent=2, sort_keys=True)
+            
+            logger.info(f"Exported {len(self.tasks)} tasks to {export_path}")
+            return export_path
+            
+        except Exception as e:
+            logger.error(f"Error exporting tasks: {e}")
+            return None
+
+    def import_tasks(self, import_path, merge=False):
+        """
+        Import tasks from a file
+        
+        Args:
+            import_path: Path to the import file
+            merge: If True, merge with existing tasks. If False, replace all tasks.
+        
+        Returns:
+            Number of tasks imported, or None on error
+        """
+        try:
+            if not os.path.exists(import_path):
+                logger.error(f"Import file not found: {import_path}")
+                return None
+            
+            with open(import_path, 'r') as f:
+                import_data = json.load(f)
+            
+            # Handle both old format (direct tasks dict) and new format (with metadata)
+            if 'tasks' in import_data:
+                imported_tasks = import_data['tasks']
+                logger.info(f"Importing from export version {import_data.get('version', 'unknown')}")
+            else:
+                imported_tasks = import_data
+            
+            # Validate imported tasks
+            if not self._validate_tasks(imported_tasks):
+                logger.error("Imported tasks failed validation")
+                return None
+            
+            if merge:
+                # Merge with existing tasks
+                original_count = len(self.tasks)
+                self.tasks.update(imported_tasks)
+                imported_count = len(self.tasks) - original_count
+                logger.info(f"Merged {imported_count} new tasks (total: {len(self.tasks)})")
+            else:
+                # Replace all tasks
+                self.tasks = imported_tasks
+                imported_count = len(self.tasks)
+                logger.info(f"Replaced all tasks with {imported_count} imported tasks")
+            
+            self.save_tasks()
+            return imported_count
+            
+        except Exception as e:
+            logger.error(f"Error importing tasks: {e}")
+            return None
+
+    def get_task_statistics(self):
+        """Get statistics about tasks"""
+        try:
+            stats = {
+                'total': len(self.tasks),
+                'by_status': {},
+                'by_operation_type': {},
+                'by_cost_center': {},
+                'scheduled': 0,
+                'one_time': 0,
+                'total_runs': 0,
+                'total_successes': 0,
+                'total_failures': 0
+            }
+            
+            for task in self.tasks.values():
+                # Count by status
+                status = task.get('status', 'unknown')
+                stats['by_status'][status] = stats['by_status'].get(status, 0) + 1
+                
+                # Count by operation type
+                op_type = task.get('operation_type', 'unknown')
+                stats['by_operation_type'][op_type] = stats['by_operation_type'].get(op_type, 0) + 1
+                
+                # Count by cost center
+                cost_center = task.get('cost_center', 'unknown')
+                stats['by_cost_center'][cost_center] = stats['by_cost_center'].get(cost_center, 0) + 1
+                
+                # Count scheduled vs one-time
+                if task.get('schedule'):
+                    stats['scheduled'] += 1
+                else:
+                    stats['one_time'] += 1
+                
+                # Aggregate run statistics
+                stats['total_runs'] += task.get('run_count', 0)
+                stats['total_successes'] += task.get('success_count', 0)
+                stats['total_failures'] += task.get('error_count', 0)
+            
+            return stats
+            
+        except Exception as e:
+            logger.error(f"Error getting task statistics: {e}")
+            return None
+
+    def cleanup_old_tasks(self, days=30):
+        """
+        Clean up old completed/failed tasks
+        
+        Args:
+            days: Remove tasks completed/failed more than this many days ago
+        
+        Returns:
+            Number of tasks removed
+        """
+        try:
+            cutoff_date = datetime.now() - timedelta(days=days)
+            tasks_to_remove = []
+            
+            for task_id, task in self.tasks.items():
+                # Only clean up completed or failed tasks
+                if task.get('status') not in ['completed', 'failed']:
+                    continue
+                
+                # Check last_run date
+                last_run = task.get('last_run')
+                if last_run:
+                    try:
+                        last_run_date = datetime.fromisoformat(last_run)
+                        if last_run_date < cutoff_date:
+                            tasks_to_remove.append(task_id)
+                    except (ValueError, TypeError):
+                        logger.warning(f"Invalid last_run date for task {task_id}: {last_run}")
+            
+            # Remove old tasks
+            for task_id in tasks_to_remove:
+                del self.tasks[task_id]
+            
+            if tasks_to_remove:
+                self.save_tasks()
+                logger.info(f"Cleaned up {len(tasks_to_remove)} old tasks (older than {days} days)")
+            
+            return len(tasks_to_remove)
+            
+        except Exception as e:
+            logger.error(f"Error cleaning up old tasks: {e}")
+            return 0
+
+    def start_auto_save(self, interval_seconds=300):
+        """
+        Start automatic periodic saving of tasks
+        
+        Args:
+            interval_seconds: How often to auto-save (default: 300 seconds / 5 minutes)
+        """
+        def auto_save_loop():
+            while True:
+                try:
+                    time.sleep(interval_seconds)
+                    self.save_tasks()
+                    logger.debug(f"Auto-saved tasks (interval: {interval_seconds}s)")
+                except Exception as e:
+                    logger.error(f"Error in auto-save: {e}")
+        
+        auto_save_thread = threading.Thread(target=auto_save_loop, daemon=True)
+        auto_save_thread.start()
+        logger.info(f"Started auto-save thread (interval: {interval_seconds}s)")
+
 
     def is_non_business_hours(self, timestamp=None):
-        """Check if current time is non-business hours"""
-        if timestamp is None:
-            timestamp = datetime.now()
-        elif isinstance(timestamp, (int, float)):
-            timestamp = datetime.fromtimestamp(timestamp)
+        """Check if current time is non-business hours with proper timezone handling"""
+        import pytz
+        from datetime import datetime, time
         
-        # Weekend (Saturday=5, Sunday=6)
-        if timestamp.weekday() >= 5:
+        # Get timezone configuration (default to UTC if not specified)
+        timezone_name = os.getenv('BUSINESS_HOURS_TIMEZONE', 'UTC')
+        try:
+            business_timezone = pytz.timezone(timezone_name)
+        except pytz.exceptions.UnknownTimeZoneError:
+            logger.warning(f"Unknown timezone '{timezone_name}', falling back to UTC")
+            business_timezone = pytz.UTC
+        
+        # Get current time in business timezone
+        if timestamp is None:
+            # Use current time in business timezone
+            current_time = datetime.now(business_timezone)
+        elif isinstance(timestamp, (int, float)):
+            # Convert Unix timestamp to business timezone
+            current_time = datetime.fromtimestamp(timestamp, tz=business_timezone)
+        elif isinstance(timestamp, datetime):
+            # Convert datetime to business timezone
+            if timestamp.tzinfo is None:
+                # Assume UTC if no timezone info
+                current_time = pytz.UTC.localize(timestamp).astimezone(business_timezone)
+            else:
+                current_time = timestamp.astimezone(business_timezone)
+        else:
+            logger.error(f"Invalid timestamp type: {type(timestamp)}")
+            current_time = datetime.now(business_timezone)
+        
+        # Get configurable business hours (default: 7 AM - 8 PM)
+        business_start_hour = int(os.getenv('BUSINESS_START_HOUR', '7'))
+        business_end_hour = int(os.getenv('BUSINESS_END_HOUR', '20'))  # 8 PM in 24-hour format
+        
+        # Validate business hours configuration
+        if not (0 <= business_start_hour <= 23) or not (0 <= business_end_hour <= 23):
+            logger.error(f"Invalid business hours: {business_start_hour}-{business_end_hour}, using defaults")
+            business_start_hour, business_end_hour = 7, 20
+        
+        if business_start_hour >= business_end_hour:
+            logger.error(f"Business start hour ({business_start_hour}) must be before end hour ({business_end_hour})")
+            business_start_hour, business_end_hour = 7, 20
+        
+        # Check if it's weekend (Saturday=5, Sunday=6)
+        is_weekend = current_time.weekday() >= 5
+        
+        # Check if it's outside business hours
+        current_hour = current_time.hour
+        is_outside_hours = current_hour < business_start_hour or current_hour >= business_end_hour
+        
+        # Check for holidays (if configured)
+        is_holiday = self._is_holiday(current_time)
+        
+        result = is_weekend or is_outside_hours or is_holiday
+        
+        # Log the decision for debugging
+        logger.debug(f"Business hours check: {current_time.strftime('%Y-%m-%d %H:%M:%S %Z')} "
+                    f"(weekday={current_time.weekday()}, hour={current_hour}) "
+                    f"-> weekend={is_weekend}, outside_hours={is_outside_hours}, holiday={is_holiday} "
+                    f"-> non_business={result}")
+        
+        return result
+
+    def _is_holiday(self, current_time):
+        """Check if the current date is a configured holiday"""
+        current_date = current_time.date()
+        
+        # Method 1: Check manual holidays from environment
+        manual_holidays = self._get_manual_holidays()
+        if current_date in manual_holidays:
+            logger.info(f"Current date {current_date} is a manually configured holiday")
             return True
         
-        # Business days: 8pm-7am
-        hour = timestamp.hour
-        return hour >= 20 or hour < 7
-
-    def validate_namespace_activation(self, cost_center, namespace):
-        """Validate if namespace can be activated"""
-        # Check cost center permissions
-        if not self.dynamodb_manager.validate_cost_center_permissions(cost_center):
-            return False, "Cost center not authorized"
+        # Method 2: Check automatic holidays using holidays library
+        if self._is_automatic_holiday(current_date):
+            return True
         
-        # Check if it's non-business hours
-        if not self.is_non_business_hours():
-            return True, "Business hours - no limit"
+        return False
+
+    def _get_manual_holidays(self):
+        """Get manually configured holidays from environment"""
+        holidays_str = os.getenv('BUSINESS_HOLIDAYS', '')
+        holiday_dates = []
         
-        # Check namespace limit during non-business hours
-        if self.active_namespaces_count >= 5:
-            return False, "Maximum 5 namespaces allowed during non-business hours"
+        if not holidays_str:
+            return holiday_dates
         
-        return True, "Validation passed"
-
-    def activate_namespace(self, namespace, cost_center, user_id=None):
-        """Activate a namespace"""
         try:
-            # Validate activation
-            is_valid, message = self.validate_namespace_activation(cost_center, namespace)
-            if not is_valid:
-                return {'success': False, 'error': message}
-            
-            # Scale up namespace resources
-            result = self.scale_namespace_resources(namespace, target_replicas=None)  # Restore original
-            
-            if result['success']:
-                # Log activity to DynamoDB
-                self.dynamodb_manager.log_namespace_activity(
-                    namespace_name=namespace,
-                    operation_type='manual_activation',
-                    cost_center=cost_center,
-                    user_id=user_id
-                )
-                
-                # Update active count if non-business hours
-                if self.is_non_business_hours():
-                    self.active_namespaces_count += 1
-                
-                return {'success': True, 'message': f'Namespace {namespace} activated successfully'}
-            else:
-                return {'success': False, 'error': result.get('error', 'Failed to activate namespace')}
-                
-        except Exception as e:
-            logger.error(f"Error activating namespace {namespace}: {e}")
-            return {'success': False, 'error': str(e)}
-
-    def deactivate_namespace(self, namespace, cost_center, user_id=None):
-        """Deactivate a namespace"""
-        try:
-            # Scale down namespace resources
-            result = self.scale_namespace_resources(namespace, target_replicas=0)
-            
-            if result['success']:
-                # Log activity to DynamoDB
-                self.dynamodb_manager.log_namespace_activity(
-                    namespace_name=namespace,
-                    operation_type='manual_deactivation',
-                    cost_center=cost_center,
-                    user_id=user_id
-                )
-                
-                # Update active count if non-business hours
-                if self.is_non_business_hours() and self.active_namespaces_count > 0:
-                    self.active_namespaces_count -= 1
-                
-                return {'success': True, 'message': f'Namespace {namespace} deactivated successfully'}
-            else:
-                return {'success': False, 'error': result.get('error', 'Failed to deactivate namespace')}
-                
-        except Exception as e:
-            logger.error(f"Error deactivating namespace {namespace}: {e}")
-            return {'success': False, 'error': str(e)}
-
-    def scale_namespace_resources(self, namespace, target_replicas):
-        """Scale all resources in a namespace"""
-        try:
-            resources = ['deployments', 'statefulsets', 'daemonsets']
-            original_scales = {}
-            results = []
-            
-            for resource_type in resources:
-                # Get current resources
-                result = self.execute_kubectl_command(f'get {resource_type} -n {namespace} -o json')
-                
-                if result['success']:
+            for date_str in holidays_str.split(','):
+                date_str = date_str.strip()
+                if date_str:
                     try:
-                        resources_data = json.loads(result['stdout'])
-                        for item in resources_data.get('items', []):
-                            resource_name = item['metadata']['name']
-                            current_replicas = item.get('spec', {}).get('replicas', 1)
-                            
-                            if target_replicas == 0:
-                                # Save original scale for restoration
-                                original_scales[f"{resource_type}/{resource_name}"] = current_replicas
-                                # Scale to 0
-                                scale_result = self.execute_kubectl_command(
-                                    f'scale {resource_type} {resource_name} --replicas=0 -n {namespace}'
-                                )
-                                results.append(scale_result)
-                            elif target_replicas is None:
-                                # Restore original scale (would need to be stored somewhere)
-                                # For now, scale to 1 as default
-                                scale_result = self.execute_kubectl_command(
-                                    f'scale {resource_type} {resource_name} --replicas=1 -n {namespace}'
-                                )
-                                results.append(scale_result)
-                            else:
-                                # Scale to specific number
-                                scale_result = self.execute_kubectl_command(
-                                    f'scale {resource_type} {resource_name} --replicas={target_replicas} -n {namespace}'
-                                )
-                                results.append(scale_result)
-                    except json.JSONDecodeError:
-                        logger.error(f"Failed to parse JSON for {resource_type} in namespace {namespace}")
+                        holiday_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                        holiday_dates.append(holiday_date)
+                    except ValueError:
+                        logger.warning(f"Invalid holiday date format: {date_str}")
+        except Exception as e:
+            logger.error(f"Error parsing manual holidays: {e}")
+        
+        return holiday_dates
+
+    def _is_automatic_holiday(self, current_date):
+        """Check if date is an automatic holiday using holidays library"""
+        try:
+            import holidays
             
-            # Check if all operations were successful
-            all_successful = all(r.get('success', False) for r in results)
+            # Get country and subdivision from environment
+            country = os.getenv('BUSINESS_HOLIDAYS_COUNTRY', '')
+            subdivision = os.getenv('BUSINESS_HOLIDAYS_SUBDIVISION', '')
+            
+            if not country:
+                return False
+            
+            # Get the year for the current date
+            year = current_date.year
+            
+            # Create holidays object for the country/subdivision
+            if subdivision:
+                country_holidays = holidays.country_holidays(country, subdiv=subdivision, years=year)
+            else:
+                country_holidays = holidays.country_holidays(country, years=year)
+            
+            is_holiday = current_date in country_holidays
+            
+            if is_holiday:
+                holiday_name = country_holidays.get(current_date, 'Unknown Holiday')
+                logger.info(f"Current date {current_date} is an automatic holiday: {holiday_name} ({country})")
+            
+            return is_holiday
+            
+        except ImportError:
+            logger.debug("holidays library not available, skipping automatic holiday check")
+            return False
+        except Exception as e:
+            logger.error(f"Error checking automatic holidays: {e}")
+            return False
+
+    def get_business_hours_info(self):
+        """Get current business hours configuration and status"""
+        import pytz
+        
+        # Get configuration
+        timezone_name = os.getenv('BUSINESS_HOURS_TIMEZONE', 'UTC')
+        business_start_hour = int(os.getenv('BUSINESS_START_HOUR', '7'))
+        business_end_hour = int(os.getenv('BUSINESS_END_HOUR', '20'))
+        
+        try:
+            business_timezone = pytz.timezone(timezone_name)
+            current_time = datetime.now(business_timezone)
+        except pytz.exceptions.UnknownTimeZoneError:
+            business_timezone = pytz.UTC
+            current_time = datetime.now(business_timezone)
+        
+        # Get manual holidays
+        manual_holidays = []
+        holidays_str = os.getenv('BUSINESS_HOLIDAYS', '')
+        if holidays_str:
+            for date_str in holidays_str.split(','):
+                date_str = date_str.strip()
+                if date_str:
+                    try:
+                        datetime.strptime(date_str, '%Y-%m-%d')  # Validate format
+                        manual_holidays.append(date_str)
+                    except ValueError:
+                        pass
+        
+        # Get automatic holidays info
+        automatic_holidays_info = self._get_automatic_holidays_info(current_time.year)
+        
+        is_non_business = self.is_non_business_hours()
+        
+        return {
+            'current_time': current_time.strftime('%Y-%m-%d %H:%M:%S %Z'),
+            'timezone': timezone_name,
+            'business_hours': f"{business_start_hour:02d}:00 - {business_end_hour:02d}:00",
+            'business_days': 'Monday - Friday',
+            'manual_holidays': manual_holidays,
+            'automatic_holidays': automatic_holidays_info,
+            'is_non_business_hours': is_non_business,
+            'current_weekday': current_time.strftime('%A'),
+            'current_hour': current_time.hour,
+            'limit_active': is_non_business
+        }
+
+    def _get_automatic_holidays_info(self, year):
+        """Get information about automatic holidays configuration"""
+        try:
+            import holidays
+            
+            country = os.getenv('BUSINESS_HOLIDAYS_COUNTRY', '')
+            subdivision = os.getenv('BUSINESS_HOLIDAYS_SUBDIVISION', '')
+            
+            if not country:
+                return {
+                    'enabled': False,
+                    'country': None,
+                    'subdivision': None,
+                    'holidays_count': 0,
+                    'holidays': []
+                }
+            
+            # Get holidays for the year
+            if subdivision:
+                country_holidays = holidays.country_holidays(country, subdiv=subdivision, years=year)
+            else:
+                country_holidays = holidays.country_holidays(country, years=year)
+            
+            # Convert to list of dictionaries with names
+            holidays_list = []
+            for date, name in sorted(country_holidays.items()):
+                holidays_list.append({
+                    'date': date.strftime('%Y-%m-%d'),
+                    'name': name
+                })
             
             return {
-                'success': all_successful,
-                'original_scales': original_scales,
-                'results': results
+                'enabled': True,
+                'country': country,
+                'subdivision': subdivision,
+                'holidays_count': len(holidays_list),
+                'holidays': holidays_list
+            }
+            
+        except ImportError:
+            return {
+                'enabled': False,
+                'error': 'holidays library not installed',
+                'country': None,
+                'subdivision': None,
+                'holidays_count': 0,
+                'holidays': []
+            }
+        except Exception as e:
+            return {
+                'enabled': False,
+                'error': str(e),
+                'country': os.getenv('BUSINESS_HOLIDAYS_COUNTRY', ''),
+                'subdivision': os.getenv('BUSINESS_HOLIDAYS_SUBDIVISION', ''),
+                'holidays_count': 0,
+                'holidays': []
+            }
+
+    def validate_namespace_activation(self, cost_center, namespace, user_id=None, requested_by=None):
+        """Validate if namespace can be activated with robust error handling
+        
+        Args:
+            cost_center: Cost center identifier
+            namespace: Namespace name to validate
+            user_id: User identifier (optional)
+            requested_by: User who requested the operation (optional)
+        
+        Returns:
+            tuple: (is_valid: bool, message: str, details: dict)
+        """
+        try:
+            # Input validation
+            if not namespace or not isinstance(namespace, str):
+                return False, "Invalid namespace name", {'error_type': 'validation_error'}
+            
+            if not cost_center or not isinstance(cost_center, str):
+                return False, "Invalid cost center", {'error_type': 'validation_error'}
+            
+            # Check if namespace exists
+            try:
+                result = self.execute_kubectl_command(f'get namespace {namespace} -o json')
+                if not result['success']:
+                    return False, f"Namespace '{namespace}' does not exist", {'error_type': 'namespace_not_found'}
+            except Exception as e:
+                logger.error(f"Error checking namespace existence: {e}")
+                return False, f"Failed to verify namespace existence: {str(e)}", {'error_type': 'kubectl_error'}
+            
+            # Check cost center permissions
+            try:
+                if not self.dynamodb_manager.validate_cost_center_permissions(
+                    cost_center, 
+                    user_id=user_id,
+                    requested_by=requested_by,
+                    operation_type='namespace_activation',
+                    namespace=namespace,
+                    cluster_name=self.cluster_name
+                ):
+                    return False, f"Cost center '{cost_center}' is not authorized", {'error_type': 'authorization_error'}
+            except Exception as e:
+                logger.error(f"Error validating cost center permissions: {e}")
+                return False, f"Failed to validate permissions: {str(e)}", {'error_type': 'permission_check_error'}
+            
+            # Check if it's non-business hours
+            try:
+                is_non_business = self.is_non_business_hours()
+            except Exception as e:
+                logger.error(f"Error checking business hours: {e}")
+                # Default to business hours if check fails (safer)
+                is_non_business = False
+            
+            if not is_non_business:
+                return True, "Business hours - no limit", {'limit_applies': False}
+            
+            # Check namespace limit during non-business hours
+            try:
+                current_active_count = self.get_active_namespaces_count()
+            except Exception as e:
+                logger.error(f"Error getting active namespace count: {e}")
+                return False, f"Failed to check namespace limits: {str(e)}", {'error_type': 'count_error'}
+            
+            # If the namespace is already active, don't count it against the limit
+            try:
+                if self.is_namespace_active(namespace):
+                    return True, f"Namespace already active (current active: {current_active_count})", {
+                        'already_active': True,
+                        'current_active_count': current_active_count
+                    }
+            except Exception as e:
+                logger.error(f"Error checking if namespace is active: {e}")
+                # Continue with validation even if this check fails
+            
+            # Check if we would exceed the limit by activating this namespace
+            max_allowed = 5
+            if current_active_count >= max_allowed:
+                return False, f"Maximum {max_allowed} namespaces allowed during non-business hours (current active: {current_active_count})", {
+                    'error_type': 'limit_exceeded',
+                    'current_active_count': current_active_count,
+                    'max_allowed': max_allowed
+                }
+            
+            return True, f"Validation passed (current active: {current_active_count})", {
+                'current_active_count': current_active_count,
+                'max_allowed': max_allowed,
+                'limit_applies': True
             }
             
         except Exception as e:
-            logger.error(f"Error scaling namespace resources: {e}")
-            return {'success': False, 'error': str(e)}
+            logger.error(f"Unexpected error in validate_namespace_activation: {e}", exc_info=True)
+            return False, f"Validation failed due to unexpected error: {str(e)}", {'error_type': 'unexpected_error'}
+
+    def activate_namespace(self, namespace, cost_center, user_id=None, requested_by=None):
+        """Activate a namespace with robust error handling
+        
+        Args:
+            namespace: Namespace name to activate
+            cost_center: Cost center identifier
+            user_id: User identifier (optional)
+            requested_by: User who requested the operation (optional)
+        
+        Returns:
+            dict: Result with success status, message, and details
+        """
+        operation_start_time = time.time()
+        user_identifier = requested_by or user_id or 'anonymous'
+        
+        try:
+            # Input validation
+            if not namespace or not isinstance(namespace, str):
+                logger.warning(f"Invalid namespace parameter: {namespace}")
+                return {
+                    'success': False, 
+                    'error': 'Invalid namespace name',
+                    'error_type': 'validation_error'
+                }
+            
+            if not cost_center or not isinstance(cost_center, str):
+                logger.warning(f"Invalid cost_center parameter: {cost_center}")
+                return {
+                    'success': False, 
+                    'error': 'Invalid cost center',
+                    'error_type': 'validation_error'
+                }
+            
+            logger.info(f"Activating namespace '{namespace}' for cost center '{cost_center}' by user '{user_identifier}'")
+            
+            # Validate activation
+            validation_result = self.validate_namespace_activation(cost_center, namespace, user_id, requested_by)
+            
+            # Handle both old (2-tuple) and new (3-tuple) return formats
+            if len(validation_result) == 3:
+                is_valid, message, details = validation_result
+            else:
+                is_valid, message = validation_result
+                details = {}
+            
+            if not is_valid:
+                logger.warning(f"Validation failed for namespace '{namespace}': {message}")
+                return {
+                    'success': False, 
+                    'error': message,
+                    'error_type': details.get('error_type', 'validation_failed'),
+                    'details': details
+                }
+            
+            # Scale up namespace resources
+            try:
+                result = self.scale_namespace_resources(namespace, target_replicas=None)
+            except Exception as e:
+                logger.error(f"Error scaling namespace resources: {e}", exc_info=True)
+                return {
+                    'success': False, 
+                    'error': f'Failed to scale namespace resources: {str(e)}',
+                    'error_type': 'scaling_error'
+                }
+            
+            if result['success']:
+                # Log activity to DynamoDB
+                try:
+                    self.dynamodb_manager.log_namespace_activity(
+                        namespace_name=namespace,
+                        operation_type='manual_activation',
+                        cost_center=cost_center,
+                        user_id=user_id,
+                        requested_by=user_identifier,
+                        cluster_name=self.cluster_name
+                    )
+                except Exception as e:
+                    # Log error but don't fail the operation
+                    logger.error(f"Failed to log activity to DynamoDB: {e}", exc_info=True)
+                
+                # Get updated count for response
+                try:
+                    updated_count = self.get_active_namespaces_count()
+                except Exception as e:
+                    logger.warning(f"Failed to get updated namespace count: {e}")
+                    updated_count = None
+                
+                operation_duration = time.time() - operation_start_time
+                logger.info(f"Successfully activated namespace '{namespace}' in {operation_duration:.2f}s")
+                
+                response = {
+                    'success': True, 
+                    'message': f'Namespace {namespace} activated successfully',
+                    'namespace': namespace,
+                    'cost_center': cost_center,
+                    'scaled_resources': result.get('scaled_resources', []),
+                    'operation_duration': operation_duration
+                }
+                
+                if updated_count is not None:
+                    response['active_namespaces_count'] = updated_count
+                
+                return response
+            else:
+                error_msg = result.get('error', 'Failed to activate namespace')
+                logger.error(f"Failed to activate namespace '{namespace}': {error_msg}")
+                
+                return {
+                    'success': False, 
+                    'error': error_msg,
+                    'error_type': 'scaling_failed',
+                    'failed_resources': result.get('failed_resources', []),
+                    'errors': result.get('errors', [])
+                }
+                
+        except KeyboardInterrupt:
+            logger.warning(f"Namespace activation interrupted by user")
+            raise
+        except Exception as e:
+            operation_duration = time.time() - operation_start_time
+            logger.error(f"Unexpected error activating namespace '{namespace}' after {operation_duration:.2f}s: {e}", exc_info=True)
+            return {
+                'success': False, 
+                'error': f'Unexpected error: {str(e)}',
+                'error_type': 'unexpected_error',
+                'operation_duration': operation_duration
+            }
+
+    def deactivate_namespace(self, namespace, cost_center, user_id=None, requested_by=None):
+        """Deactivate a namespace with robust error handling
+        
+        Args:
+            namespace: Namespace name to deactivate
+            cost_center: Cost center identifier
+            user_id: User identifier (optional)
+            requested_by: User who requested the operation (optional)
+        
+        Returns:
+            dict: Result with success status, message, and details
+        """
+        operation_start_time = time.time()
+        user_identifier = requested_by or user_id or 'anonymous'
+        
+        try:
+            # Input validation
+            if not namespace or not isinstance(namespace, str):
+                logger.warning(f"Invalid namespace parameter: {namespace}")
+                return {
+                    'success': False, 
+                    'error': 'Invalid namespace name',
+                    'error_type': 'validation_error'
+                }
+            
+            if not cost_center or not isinstance(cost_center, str):
+                logger.warning(f"Invalid cost_center parameter: {cost_center}")
+                return {
+                    'success': False, 
+                    'error': 'Invalid cost center',
+                    'error_type': 'validation_error'
+                }
+            
+            logger.info(f"Deactivating namespace '{namespace}' for cost center '{cost_center}' by user '{user_identifier}'")
+            
+            # Check if namespace exists
+            try:
+                result = self.execute_kubectl_command(f'get namespace {namespace} -o json')
+                if not result['success']:
+                    logger.warning(f"Namespace '{namespace}' does not exist")
+                    return {
+                        'success': False, 
+                        'error': f"Namespace '{namespace}' does not exist",
+                        'error_type': 'namespace_not_found'
+                    }
+            except Exception as e:
+                logger.error(f"Error checking namespace existence: {e}")
+                return {
+                    'success': False, 
+                    'error': f"Failed to verify namespace existence: {str(e)}",
+                    'error_type': 'kubectl_error'
+                }
+            
+            # Validate cost center permissions before deactivation
+            try:
+                if not self.dynamodb_manager.validate_cost_center_permissions(
+                    cost_center,
+                    user_id=user_id,
+                    requested_by=requested_by,
+                    operation_type='namespace_deactivation',
+                    namespace=namespace,
+                    cluster_name=self.cluster_name
+                ):
+                    logger.warning(f"Cost center '{cost_center}' not authorized for deactivation")
+                    return {
+                        'success': False, 
+                        'error': f"Cost center '{cost_center}' is not authorized",
+                        'error_type': 'authorization_error'
+                    }
+            except Exception as e:
+                logger.error(f"Error validating cost center permissions: {e}", exc_info=True)
+                return {
+                    'success': False, 
+                    'error': f"Failed to validate permissions: {str(e)}",
+                    'error_type': 'permission_check_error'
+                }
+            
+            # Scale down namespace resources
+            try:
+                result = self.scale_namespace_resources(namespace, target_replicas=0)
+            except Exception as e:
+                logger.error(f"Error scaling namespace resources: {e}", exc_info=True)
+                return {
+                    'success': False, 
+                    'error': f'Failed to scale namespace resources: {str(e)}',
+                    'error_type': 'scaling_error'
+                }
+            
+            if result['success']:
+                # Log activity to DynamoDB
+                try:
+                    self.dynamodb_manager.log_namespace_activity(
+                        namespace_name=namespace,
+                        operation_type='manual_deactivation',
+                        cost_center=cost_center,
+                        user_id=user_id,
+                        requested_by=user_identifier,
+                        cluster_name=self.cluster_name
+                    )
+                except Exception as e:
+                    # Log error but don't fail the operation
+                    logger.error(f"Failed to log activity to DynamoDB: {e}", exc_info=True)
+                
+                # Get updated count for response
+                try:
+                    updated_count = self.get_active_namespaces_count()
+                except Exception as e:
+                    logger.warning(f"Failed to get updated namespace count: {e}")
+                    updated_count = None
+                
+                operation_duration = time.time() - operation_start_time
+                logger.info(f"Successfully deactivated namespace '{namespace}' in {operation_duration:.2f}s")
+                
+                response = {
+                    'success': True, 
+                    'message': f'Namespace {namespace} deactivated successfully',
+                    'namespace': namespace,
+                    'cost_center': cost_center,
+                    'scaled_resources': result.get('scaled_resources', []),
+                    'operation_duration': operation_duration
+                }
+                
+                if updated_count is not None:
+                    response['active_namespaces_count'] = updated_count
+                
+                return response
+            else:
+                error_msg = result.get('error', 'Failed to deactivate namespace')
+                logger.error(f"Failed to deactivate namespace '{namespace}': {error_msg}")
+                
+                return {
+                    'success': False, 
+                    'error': error_msg,
+                    'error_type': 'scaling_failed',
+                    'failed_resources': result.get('failed_resources', []),
+                    'errors': result.get('errors', [])
+                }
+                
+        except KeyboardInterrupt:
+            logger.warning(f"Namespace deactivation interrupted by user")
+            raise
+        except Exception as e:
+            operation_duration = time.time() - operation_start_time
+            logger.error(f"Unexpected error deactivating namespace '{namespace}' after {operation_duration:.2f}s: {e}", exc_info=True)
+            return {
+                'success': False, 
+                'error': f'Unexpected error: {str(e)}',
+                'error_type': 'unexpected_error',
+                'operation_duration': operation_duration
+            }
+
+    def scale_namespace_resources(self, namespace, target_replicas, enable_rollback=True):
+        """Scale all scalable resources in a namespace with rollback support
+        
+        Args:
+            namespace: The namespace to scale
+            target_replicas: Target replica count. Use 0 to scale down, None to restore original, or specific number
+            enable_rollback: If True, rollback changes on partial failure (default: True)
+        
+        Returns:
+            dict with success status, scaled resources info, rollback info, and any errors
+        """
+        try:
+            # Only deployments and statefulsets can be scaled (not daemonsets)
+            scalable_resources = ['deployments', 'statefulsets']
+            scaled_resources = []
+            failed_resources = []
+            errors = []
+            rollback_performed = False
+            rollback_results = []
+            
+            for resource_type in scalable_resources:
+                # Get current resources
+                result = self.execute_kubectl_command(f'get {resource_type} -n {namespace} -o json')
+                
+                if not result['success']:
+                    logger.warning(f"Failed to get {resource_type} in namespace {namespace}: {result['stderr']}")
+                    continue
+                
+                try:
+                    resources_data = json.loads(result['stdout'])
+                    items = resources_data.get('items', [])
+                    
+                    if not items:
+                        logger.debug(f"No {resource_type} found in namespace {namespace}")
+                        continue
+                    
+                    for item in items:
+                        resource_name = item['metadata']['name']
+                        current_replicas = item.get('spec', {}).get('replicas', 0)
+                        
+                        # Determine target replicas for this resource
+                        if target_replicas == 0:
+                            # Scale down to 0
+                            new_replicas = 0
+                        elif target_replicas is None:
+                            # Restore: check if we have stored original value
+                            # For now, restore to 1 if it was 0, otherwise keep current
+                            # TODO: Store original values in DynamoDB or ConfigMap for proper restoration
+                            new_replicas = max(current_replicas, 1) if current_replicas == 0 else current_replicas
+                        else:
+                            # Scale to specific number
+                            new_replicas = target_replicas
+                        
+                        # Skip if already at target
+                        if current_replicas == new_replicas:
+                            logger.debug(f"{resource_type}/{resource_name} already at {new_replicas} replicas")
+                            scaled_resources.append({
+                                'type': resource_type,
+                                'name': resource_name,
+                                'from_replicas': current_replicas,
+                                'to_replicas': new_replicas,
+                                'status': 'skipped',
+                                'reason': 'already at target'
+                            })
+                            continue
+                        
+                        # Execute scale command
+                        scale_result = self.execute_kubectl_command(
+                            f'scale {resource_type} {resource_name} --replicas={new_replicas} -n {namespace}'
+                        )
+                        
+                        if scale_result['success']:
+                            logger.info(f"Scaled {resource_type}/{resource_name} from {current_replicas} to {new_replicas} replicas")
+                            scaled_resources.append({
+                                'type': resource_type,
+                                'name': resource_name,
+                                'from_replicas': current_replicas,
+                                'to_replicas': new_replicas,
+                                'status': 'success'
+                            })
+                        else:
+                            error_msg = f"Failed to scale {resource_type}/{resource_name}: {scale_result['stderr']}"
+                            logger.error(error_msg)
+                            errors.append(error_msg)
+                            failed_resources.append({
+                                'type': resource_type,
+                                'name': resource_name,
+                                'from_replicas': current_replicas,
+                                'to_replicas': new_replicas,
+                                'status': 'failed',
+                                'error': scale_result['stderr']
+                            })
+                            
+                            # If rollback is enabled and we have failures, perform rollback
+                            if enable_rollback and len(scaled_resources) > 0:
+                                logger.warning(f"Failure detected, initiating rollback of {len(scaled_resources)} successfully scaled resources")
+                                rollback_results = self._rollback_scaling(namespace, scaled_resources)
+                                rollback_performed = True
+                                
+                                # Stop processing more resources after rollback
+                                break
+                
+                except json.JSONDecodeError as e:
+                    error_msg = f"Failed to parse JSON for {resource_type} in namespace {namespace}: {e}"
+                    logger.error(error_msg)
+                    errors.append(error_msg)
+                    
+                    # Rollback on JSON parse error if we have successful scales
+                    if enable_rollback and len(scaled_resources) > 0:
+                        logger.warning(f"JSON parse error detected, initiating rollback")
+                        rollback_results = self._rollback_scaling(namespace, scaled_resources)
+                        rollback_performed = True
+                    break
+                    
+                except Exception as e:
+                    error_msg = f"Error processing {resource_type} in namespace {namespace}: {e}"
+                    logger.error(error_msg)
+                    errors.append(error_msg)
+                    
+                    # Rollback on unexpected error if we have successful scales
+                    if enable_rollback and len(scaled_resources) > 0:
+                        logger.warning(f"Unexpected error detected, initiating rollback")
+                        rollback_results = self._rollback_scaling(namespace, scaled_resources)
+                        rollback_performed = True
+                    break
+                
+                # If rollback was performed, stop processing more resource types
+                if rollback_performed:
+                    break
+            
+            # Determine overall success
+            has_failures = len(failed_resources) > 0
+            has_successes = len(scaled_resources) > 0
+            
+            result = {
+                'success': not has_failures and has_successes,
+                'scaled_resources': scaled_resources,
+                'failed_resources': failed_resources,
+                'total_scaled': len(scaled_resources),
+                'total_failed': len(failed_resources),
+                'rollback_performed': rollback_performed
+            }
+            
+            if rollback_performed:
+                result['rollback_results'] = rollback_results
+                result['success'] = False  # Operation failed if rollback was needed
+                
+                # Count successful rollbacks
+                successful_rollbacks = sum(1 for r in rollback_results if r.get('status') == 'success')
+                result['rollback_success_count'] = successful_rollbacks
+                result['rollback_failed_count'] = len(rollback_results) - successful_rollbacks
+            
+            if errors:
+                result['errors'] = errors
+            
+            if not has_successes and not has_failures:
+                result['message'] = f'No scalable resources found in namespace {namespace}'
+                result['success'] = True  # Not an error, just nothing to scale
+            
+            return result
+            
+        except Exception as e:
+            error_msg = f"Error scaling namespace resources: {e}"
+            logger.error(error_msg, exc_info=True)
+            return {
+                'success': False,
+                'error': error_msg,
+                'scaled_resources': [],
+                'failed_resources': [],
+                'total_scaled': 0,
+                'total_failed': 0,
+                'rollback_performed': False
+            }
+    
+    def _rollback_scaling(self, namespace, scaled_resources):
+        """Rollback scaling operations by reverting to original replica counts
+        
+        Args:
+            namespace: The namespace where scaling occurred
+            scaled_resources: List of successfully scaled resources to rollback
+        
+        Returns:
+            list: Results of rollback operations
+        """
+        rollback_results = []
+        
+        logger.info(f"Starting rollback of {len(scaled_resources)} resources in namespace {namespace}")
+        
+        for resource in scaled_resources:
+            # Skip resources that were skipped (already at target)
+            if resource.get('status') == 'skipped':
+                continue
+            
+            resource_type = resource['type']
+            resource_name = resource['name']
+            original_replicas = resource['from_replicas']
+            
+            try:
+                logger.info(f"Rolling back {resource_type}/{resource_name} to {original_replicas} replicas")
+                
+                # Execute rollback scale command
+                rollback_result = self.execute_kubectl_command(
+                    f'scale {resource_type} {resource_name} --replicas={original_replicas} -n {namespace}'
+                )
+                
+                if rollback_result['success']:
+                    logger.info(f"Successfully rolled back {resource_type}/{resource_name}")
+                    rollback_results.append({
+                        'type': resource_type,
+                        'name': resource_name,
+                        'restored_replicas': original_replicas,
+                        'status': 'success'
+                    })
+                else:
+                    logger.error(f"Failed to rollback {resource_type}/{resource_name}: {rollback_result['stderr']}")
+                    rollback_results.append({
+                        'type': resource_type,
+                        'name': resource_name,
+                        'restored_replicas': original_replicas,
+                        'status': 'failed',
+                        'error': rollback_result['stderr']
+                    })
+            
+            except Exception as e:
+                logger.error(f"Error during rollback of {resource_type}/{resource_name}: {e}", exc_info=True)
+                rollback_results.append({
+                    'type': resource_type,
+                    'name': resource_name,
+                    'restored_replicas': original_replicas,
+                    'status': 'failed',
+                    'error': str(e)
+                })
+        
+        logger.info(f"Rollback completed: {len(rollback_results)} operations performed")
+        return rollback_results
 
     def add_task(self, task_data):
         """Add a new task"""
         task_id = task_data.get('id', str(uuid.uuid4()))
+        cost_center = task_data.get('cost_center', 'default')
+        namespace = task_data.get('namespace', 'default')
+        user_id = task_data.get('user_id', 'anonymous')
+        requested_by = task_data.get('requested_by', user_id)
+        
+        # Validate cost center permissions before creating task
+        if not self.dynamodb_manager.validate_cost_center_permissions(
+            cost_center,
+            user_id=user_id,
+            requested_by=requested_by,
+            operation_type='task_creation',
+            namespace=namespace
+        ):
+            raise ValueError(f"Cost center '{cost_center}' is not authorized")
         
         # Enhanced task structure for namespace scheduling
         self.tasks[task_id] = {
@@ -414,11 +2074,12 @@ class TaskScheduler:
             'title': task_data.get('title', ''),
             'command': task_data.get('command', ''),
             'schedule': task_data.get('schedule', ''),
-            'namespace': task_data.get('namespace', 'default'),
-            'cost_center': task_data.get('cost_center', 'default'),
+            'namespace': namespace,
+            'cost_center': cost_center,
             'operation_type': task_data.get('operation_type', 'command'),  # 'command', 'activate', 'deactivate'
             'status': 'pending',
             'created_at': datetime.now().isoformat(),
+            'created_by': requested_by,  # Track who created the task
             'last_run': None,
             'next_run': self.calculate_next_run(task_data.get('schedule', '')),
             'run_count': 0,
@@ -432,6 +2093,9 @@ class TaskScheduler:
                 namespace_name=self.tasks[task_id]['namespace'],
                 operation_type='task_created',
                 cost_center=self.tasks[task_id]['cost_center'],
+                user_id=user_id,
+                requested_by=requested_by,
+                cluster_name=self.cluster_name,
                 task_id=task_id,
                 task_title=self.tasks[task_id]['title']
             )
@@ -441,15 +2105,33 @@ class TaskScheduler:
         self.save_tasks()
         return self.tasks[task_id]
 
-    def calculate_next_run(self, cron_expression):
-        """Calculate next run time from cron expression"""
+    def calculate_next_run(self, cron_expression, base_time=None):
+        """
+        Calculate next run time from cron expression
+        
+        Args:
+            cron_expression: Cron expression string (e.g., "0 9 * * *")
+            base_time: Optional base datetime to calculate from. If None, uses current time.
+        
+        Returns:
+            ISO format string of next run time, or None if invalid
+        """
         try:
-            if cron_expression:
-                cron = croniter(cron_expression, datetime.now())
-                return cron.get_next(datetime).isoformat()
+            if not cron_expression:
+                return None
+            
+            # Use provided base_time or current time
+            if base_time is None:
+                base_time = datetime.now()
+            
+            # Create croniter instance and get next occurrence
+            cron = croniter(cron_expression, base_time)
+            next_run = cron.get_next(datetime)
+            
+            return next_run.isoformat()
         except Exception as e:
-            logger.error(f"Error calculating next run: {e}")
-        return None
+            logger.error(f"Error calculating next run for expression '{cron_expression}': {e}")
+            return None
 
     def execute_kubectl_command(self, command, namespace='default'):
         """Execute kubectl command"""
@@ -474,14 +2156,28 @@ class TaskScheduler:
 
             logger.info(f"Executing command: {command}")
             
+            # Prepare environment with KUBECONFIG
+            env = os.environ.copy()
+            if 'KUBECONFIG' not in env:
+                # Set kubeconfig to user's home directory
+                env['KUBECONFIG'] = os.path.expanduser('~/.kube/config')
+            
+            # Debug: Check if AWS credentials are present
+            has_aws_creds = 'AWS_ACCESS_KEY_ID' in env and 'AWS_SECRET_ACCESS_KEY' in env
+            logger.info(f"Using KUBECONFIG: {env.get('KUBECONFIG')}, AWS creds present: {has_aws_creds}")
+            
             # Execute command
             result = subprocess.run(
                 command.split(),
                 capture_output=True,
                 text=True,
-                timeout=300  # 5 minute timeout
+                timeout=300,  # 5 minute timeout
+                env=env  # Pass environment variables including AWS credentials and KUBECONFIG
             )
 
+            if result.returncode != 0:
+                logger.error(f"kubectl command failed: {result.stderr}")
+            
             return {
                 'success': result.returncode == 0,
                 'stdout': result.stdout,
@@ -506,121 +2202,428 @@ class TaskScheduler:
             }
 
     def run_task(self, task_id):
-        """Run a specific task"""
+        """Run a specific task with improved thread management"""
         if task_id not in self.tasks:
+            logger.error(f"Task {task_id} not found")
+            return False
+
+        # Check if task is already running
+        if task_id in self.running_tasks:
+            logger.warning(f"Task {task_id} is already running, skipping")
             return False
 
         task = self.tasks[task_id]
-        task['status'] = 'running'
-        task['last_run'] = datetime.now().isoformat()
-        task['run_count'] += 1
         
-        self.running_tasks[task_id] = threading.Thread(
-            target=self._execute_task,
-            args=(task_id,)
-        )
-        self.running_tasks[task_id].start()
-        return True
+        # Create lock for this task if it doesn't exist
+        if task_id not in self.task_locks:
+            self.task_locks[task_id] = threading.Lock()
+        
+        # Update task status
+        with self.task_locks[task_id]:
+            task['status'] = 'running'
+            task['last_run'] = datetime.now().isoformat()
+            task['run_count'] += 1
+            self.save_tasks()
+        
+        # Submit task to thread pool
+        try:
+            future = self.executor.submit(self._execute_task_with_retry, task_id)
+            self.running_tasks[task_id] = future
+            self.task_futures[task_id] = future
+            
+            # Add callback to clean up when task completes
+            future.add_done_callback(lambda f: self._task_completion_callback(task_id, f))
+            
+            logger.info(f"Task {task_id} ({task.get('title', 'Untitled')}) submitted to thread pool")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error submitting task {task_id} to thread pool: {e}")
+            with self.task_locks[task_id]:
+                task['status'] = 'failed'
+                task['error_count'] += 1
+                self.save_tasks()
+            return False
+
+    def _task_completion_callback(self, task_id, future):
+        """Callback executed when a task completes"""
+        try:
+            # Remove from running tasks
+            if task_id in self.running_tasks:
+                del self.running_tasks[task_id]
+            
+            # Check if task completed successfully or with error
+            if future.cancelled():
+                logger.warning(f"Task {task_id} was cancelled")
+            elif future.exception():
+                logger.error(f"Task {task_id} raised exception: {future.exception()}")
+            else:
+                logger.info(f"Task {task_id} completed successfully")
+                
+        except Exception as e:
+            logger.error(f"Error in task completion callback for {task_id}: {e}")
+
+    def _execute_task_with_retry(self, task_id):
+        """Execute task with retry logic"""
+        task = self.tasks[task_id]
+        last_error = None
+        
+        for attempt in range(self.max_retries):
+            try:
+                logger.info(f"Executing task {task_id} (attempt {attempt + 1}/{self.max_retries})")
+                
+                # Execute the task with timeout
+                result = self._execute_task_with_timeout(task_id)
+                
+                if result.get('success', False):
+                    logger.info(f"Task {task_id} succeeded on attempt {attempt + 1}")
+                    return result
+                else:
+                    last_error = result.get('error', 'Unknown error')
+                    logger.warning(f"Task {task_id} failed on attempt {attempt + 1}: {last_error}")
+                    
+                    # Don't retry if it's the last attempt
+                    if attempt < self.max_retries - 1:
+                        logger.info(f"Retrying task {task_id} in {self.retry_delay} seconds...")
+                        time.sleep(self.retry_delay)
+                    
+            except Exception as e:
+                last_error = str(e)
+                logger.error(f"Task {task_id} raised exception on attempt {attempt + 1}: {e}")
+                logger.error(traceback.format_exc())
+                
+                if attempt < self.max_retries - 1:
+                    time.sleep(self.retry_delay)
+        
+        # All retries failed
+        logger.error(f"Task {task_id} failed after {self.max_retries} attempts")
+        return {
+            'success': False,
+            'error': f"Failed after {self.max_retries} attempts. Last error: {last_error}",
+            'stderr': last_error
+        }
+
+    def _execute_task_with_timeout(self, task_id):
+        """Execute task with timeout"""
+        task = self.tasks[task_id]
+        
+        try:
+            # Create a future for the actual task execution
+            execution_future = self.executor.submit(self._execute_task, task_id)
+            
+            # Wait for completion with timeout
+            result = execution_future.result(timeout=self.task_timeout)
+            return result
+            
+        except FuturesTimeoutError:
+            logger.error(f"Task {task_id} timed out after {self.task_timeout} seconds")
+            execution_future.cancel()
+            return {
+                'success': False,
+                'error': f'Task timed out after {self.task_timeout} seconds',
+                'stderr': f'Timeout after {self.task_timeout} seconds'
+            }
+        except Exception as e:
+            logger.error(f"Error executing task {task_id} with timeout: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'stderr': str(e)
+            }
 
     def _execute_task(self, task_id):
-        """Execute task in background thread"""
+        """Execute task in background thread with detailed structured logging"""
         task = self.tasks[task_id]
+        start_time = time.time()
+        
+        # Log task start with context
+        log_with_context(
+            'info',
+            f"Starting task execution: {task.get('title', 'Untitled')}",
+            task_id=task_id,
+            operation=task.get('operation_type', 'unknown'),
+            namespace=task.get('namespace'),
+            cost_center=task.get('cost_center')
+        )
         
         try:
             # Handle different operation types
             if task.get('operation_type') == 'activate':
+                log_with_context(
+                    'info',
+                    f"Activating namespace",
+                    task_id=task_id,
+                    namespace=task['namespace'],
+                    operation='activate'
+                )
                 result = self.activate_namespace(
                     task['namespace'], 
                     task['cost_center'],
-                    user_id='scheduler'
+                    user_id='scheduler',
+                    requested_by=f"scheduler-task-{task_id}"
                 )
             elif task.get('operation_type') == 'deactivate':
+                log_with_context(
+                    'info',
+                    f"Deactivating namespace",
+                    task_id=task_id,
+                    namespace=task['namespace'],
+                    operation='deactivate'
+                )
                 result = self.deactivate_namespace(
                     task['namespace'], 
                     task['cost_center'],
-                    user_id='scheduler'
+                    user_id='scheduler',
+                    requested_by=f"scheduler-task-{task_id}"
                 )
             else:
                 # Regular kubectl command
+                log_with_context(
+                    'info',
+                    f"Executing kubectl command: {task.get('command')}",
+                    task_id=task_id,
+                    namespace=task.get('namespace', 'default'),
+                    operation='kubectl_command'
+                )
                 result = self.execute_kubectl_command(
                     task['command'],
-                    task['namespace']
+                    task.get('namespace', 'default')
                 )
             
-            if result.get('success', False):
-                task['status'] = 'completed'
-                task['success_count'] += 1
-            else:
-                task['status'] = 'failed'
-                task['error_count'] += 1
-
-            # Add to history
-            history_entry = {
-                'task_id': task_id,
-                'title': task['title'],
-                'command': task.get('command', f"{task.get('operation_type', 'unknown')} {task['namespace']}"),
-                'timestamp': datetime.now().isoformat(),
-                'success': result.get('success', False),
-                'output': result.get('stdout', result.get('message', '')),
-                'error': result.get('stderr', result.get('error', ''))
-            }
-            self.task_history.append(history_entry)
+            execution_time = time.time() - start_time
+            duration_ms = int(execution_time * 1000)
             
-            # Keep only last 100 history entries
-            if len(self.task_history) > 100:
-                self.task_history = self.task_history[-100:]
+            # Update task status based on result
+            with self.task_locks.get(task_id, threading.Lock()):
+                if result.get('success', False):
+                    task['status'] = 'completed'
+                    task['success_count'] += 1
+                    
+                    log_with_context(
+                        'info',
+                        f"Task completed successfully",
+                        task_id=task_id,
+                        namespace=task.get('namespace'),
+                        cost_center=task.get('cost_center'),
+                        operation=task.get('operation_type'),
+                        duration_ms=duration_ms
+                    )
+                else:
+                    task['status'] = 'failed'
+                    task['error_count'] += 1
+                    error_msg = result.get('stderr', result.get('error', 'Unknown error'))
+                    
+                    log_with_context(
+                        'error',
+                        f"Task failed: {error_msg}",
+                        task_id=task_id,
+                        namespace=task.get('namespace'),
+                        cost_center=task.get('cost_center'),
+                        operation=task.get('operation_type'),
+                        duration_ms=duration_ms
+                    )
 
-            # Calculate next run if it's a scheduled task
-            if task['schedule']:
-                task['next_run'] = self.calculate_next_run(task['schedule'])
-                task['status'] = 'pending'
+                # Add to history with detailed information
+                history_entry = {
+                    'task_id': task_id,
+                    'title': task['title'],
+                    'command': task.get('command', f"{task.get('operation_type', 'unknown')} {task.get('namespace', 'N/A')}"),
+                    'timestamp': datetime.now().isoformat(),
+                    'execution_time_seconds': round(execution_time, 2),
+                    'success': result.get('success', False),
+                    'output': result.get('stdout', result.get('message', ''))[:1000],  # Limit output size
+                    'error': result.get('stderr', result.get('error', ''))[:1000],  # Limit error size
+                    'operation_type': task.get('operation_type'),
+                    'namespace': task.get('namespace'),
+                    'cost_center': task.get('cost_center')
+                }
+                self.task_history.append(history_entry)
+                
+                # Keep only last 100 history entries
+                if len(self.task_history) > 100:
+                    self.task_history = self.task_history[-100:]
+
+                # Calculate next run if it's a scheduled task
+                if task['schedule']:
+                    # Use the original scheduled time as base for calculating next run
+                    # This ensures consistent scheduling even if execution is delayed
+                    try:
+                        original_next_run = datetime.fromisoformat(task['next_run'])
+                        task['next_run'] = self.calculate_next_run(task['schedule'], original_next_run)
+                        logger.info(f"Next run for task {task_id} scheduled at {task['next_run']}")
+                    except (ValueError, TypeError) as e:
+                        # Fallback to current time if original next_run is invalid
+                        logger.warning(f"Could not parse original next_run for task {task_id}: {e}")
+                        task['next_run'] = self.calculate_next_run(task['schedule'])
+                    task['status'] = 'pending'
+                
+                self.save_tasks()
+            
+            return result
 
         except Exception as e:
-            logger.error(f"Error executing task {task_id}: {e}")
-            task['status'] = 'failed'
-            task['error_count'] += 1
+            execution_time = time.time() - start_time
+            logger.error(f"Unexpected error executing task {task_id} after {execution_time:.2f}s: {e}")
+            logger.error(traceback.format_exc())
+            
+            with self.task_locks.get(task_id, threading.Lock()):
+                task['status'] = 'failed'
+                task['error_count'] += 1
+                
+                # Add error to history
+                history_entry = {
+                    'task_id': task_id,
+                    'title': task.get('title', 'Untitled'),
+                    'command': task.get('command', 'N/A'),
+                    'timestamp': datetime.now().isoformat(),
+                    'execution_time_seconds': round(execution_time, 2),
+                    'success': False,
+                    'output': '',
+                    'error': f"Exception: {str(e)}"[:1000],
+                    'operation_type': task.get('operation_type'),
+                    'namespace': task.get('namespace'),
+                    'cost_center': task.get('cost_center')
+                }
+                self.task_history.append(history_entry)
+                
+                self.save_tasks()
+            
+            return {
+                'success': False,
+                'error': str(e),
+                'stderr': str(e)
+            }
 
-        finally:
-            if task_id in self.running_tasks:
-                del self.running_tasks[task_id]
-            self.save_tasks()
+    def cancel_task(self, task_id):
+        """Cancel a running task"""
+        if task_id not in self.running_tasks:
+            logger.warning(f"Task {task_id} is not running, cannot cancel")
+            return False
+        
+        try:
+            future = self.running_tasks[task_id]
+            cancelled = future.cancel()
+            
+            if cancelled:
+                logger.info(f"Task {task_id} cancelled successfully")
+                with self.task_locks.get(task_id, threading.Lock()):
+                    if task_id in self.tasks:
+                        self.tasks[task_id]['status'] = 'cancelled'
+                        self.save_tasks()
+            else:
+                logger.warning(f"Task {task_id} could not be cancelled (already running or completed)")
+            
+            return cancelled
+            
+        except Exception as e:
+            logger.error(f"Error cancelling task {task_id}: {e}")
+            return False
+
+    def cleanup_completed_tasks(self):
+        """Clean up completed task futures from tracking"""
+        completed_task_ids = []
+        
+        for task_id, future in list(self.running_tasks.items()):
+            if future.done():
+                completed_task_ids.append(task_id)
+        
+        for task_id in completed_task_ids:
+            del self.running_tasks[task_id]
+            if task_id in self.task_futures:
+                del self.task_futures[task_id]
+        
+        if completed_task_ids:
+            logger.debug(f"Cleaned up {len(completed_task_ids)} completed task futures")
+        
+        return len(completed_task_ids)
+
+    def get_thread_pool_stats(self):
+        """Get thread pool statistics"""
+        return {
+            'max_workers': self.max_workers,
+            'running_tasks': len(self.running_tasks),
+            'task_timeout': self.task_timeout,
+            'max_retries': self.max_retries,
+            'retry_delay': self.retry_delay,
+            'total_tasks': len(self.tasks),
+            'pending_tasks': len([t for t in self.tasks.values() if t.get('status') == 'pending']),
+            'completed_tasks': len([t for t in self.tasks.values() if t.get('status') == 'completed']),
+            'failed_tasks': len([t for t in self.tasks.values() if t.get('status') == 'failed'])
+        }
 
     def start_scheduler(self):
-        """Start the task scheduler"""
+        """Start the task scheduler with periodic cleanup"""
         def scheduler_loop():
+            cleanup_counter = 0
             while True:
                 try:
                     now = datetime.now()
-                    for task_id, task in self.tasks.items():
+                    
+                    # Check for tasks that need to run
+                    for task_id, task in list(self.tasks.items()):
                         if (task['status'] == 'pending' and 
-                            task['next_run'] and 
+                            task.get('next_run') and 
                             datetime.fromisoformat(task['next_run']) <= now and
                             task_id not in self.running_tasks):
                             
-                            logger.info(f"Running scheduled task: {task['title']}")
+                            logger.info(f"Running scheduled task: {task.get('title', task_id)}")
                             self.run_task(task_id)
                     
+                    # Periodic cleanup of completed task futures (every 5 minutes)
+                    cleanup_counter += 1
+                    if cleanup_counter >= 5:
+                        cleaned = self.cleanup_completed_tasks()
+                        if cleaned > 0:
+                            logger.info(f"Periodic cleanup: removed {cleaned} completed task futures")
+                        cleanup_counter = 0
+                    
                     time.sleep(60)  # Check every minute
+                    
                 except Exception as e:
                     logger.error(f"Scheduler error: {e}")
+                    logger.error(traceback.format_exc())
                     time.sleep(60)
 
         scheduler_thread = threading.Thread(target=scheduler_loop, daemon=True)
         scheduler_thread.start()
-        logger.info("Task scheduler started")
+        logger.info("Task scheduler started with periodic cleanup")
 
 # Initialize scheduler
 scheduler = TaskScheduler()
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    """Health check endpoint"""
+    """Health check endpoint with detailed thread pool status"""
     return jsonify({
         'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
         'tasks_count': len(scheduler.tasks),
-        'running_tasks': len(scheduler.running_tasks)
+        'running_tasks': len(scheduler.running_tasks),
+        'thread_pool': {
+            'max_workers': scheduler.max_workers,
+            'active_threads': len(scheduler.running_tasks),
+            'task_timeout': scheduler.task_timeout,
+            'max_retries': scheduler.max_retries
+        }
     })
+
+@app.route('/api/tasks/running', methods=['GET'])
+def get_running_tasks():
+    """Get currently running tasks with status"""
+    running_tasks_info = []
+    for task_id, future in scheduler.running_tasks.items():
+        if task_id in scheduler.tasks:
+            task = scheduler.tasks[task_id]
+            running_tasks_info.append({
+                'task_id': task_id,
+                'title': task.get('title', 'Untitled'),
+                'status': task.get('status', 'unknown'),
+                'last_run': task.get('last_run'),
+                'run_count': task.get('run_count', 0),
+                'is_done': future.done() if future else False,
+                'is_cancelled': future.cancelled() if future else False
+            })
+    return jsonify(running_tasks_info)
 
 @app.route('/api/tasks', methods=['GET'])
 def get_tasks():
@@ -632,8 +2635,17 @@ def create_task():
     """Create a new task"""
     try:
         task_data = request.get_json()
+        
+        # Validate required fields
+        if not task_data.get('cost_center'):
+            return jsonify({'error': 'cost_center is required'}), 400
+        
         task = scheduler.add_task(task_data)
         return jsonify(task), 201
+    except ValueError as e:
+        # Cost center validation error
+        logger.warning(f"Task creation failed: {e}")
+        return jsonify({'error': str(e)}), 403
     except Exception as e:
         logger.error(f"Error creating task: {e}")
         return jsonify({'error': str(e)}), 400
@@ -661,6 +2673,96 @@ def run_task_now(task_id):
         return jsonify({'message': 'Task started'})
     return jsonify({'error': 'Task not found or already running'}), 400
 
+@app.route('/api/tasks/<task_id>/cancel', methods=['POST'])
+def cancel_task(task_id):
+    """Cancel a running task"""
+    if scheduler.cancel_task(task_id):
+        return jsonify({'message': 'Task cancelled successfully'})
+    return jsonify({'error': 'Task not found or not running'}), 400
+
+@app.route('/api/tasks/stats', methods=['GET'])
+def get_task_stats():
+    """Get thread pool and task statistics"""
+    stats = scheduler.get_thread_pool_stats()
+    task_stats = scheduler.get_task_statistics()
+    
+    # Merge both statistics
+    if task_stats:
+        stats.update(task_stats)
+    
+    return jsonify(stats)
+
+@app.route('/api/tasks/export', methods=['POST'])
+def export_tasks():
+    """Export all tasks to a file"""
+    try:
+        data = request.get_json() or {}
+        export_path = data.get('path')
+        
+        result_path = scheduler.export_tasks(export_path)
+        
+        if result_path:
+            return jsonify({
+                'success': True,
+                'message': 'Tasks exported successfully',
+                'path': result_path,
+                'task_count': len(scheduler.tasks)
+            })
+        else:
+            return jsonify({'error': 'Failed to export tasks'}), 500
+    
+    except Exception as e:
+        logger.error(f"Error in export endpoint: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/tasks/import', methods=['POST'])
+def import_tasks():
+    """Import tasks from a file"""
+    try:
+        data = request.get_json()
+        import_path = data.get('path')
+        merge = data.get('merge', False)
+        
+        if not import_path:
+            return jsonify({'error': 'Import path is required'}), 400
+        
+        imported_count = scheduler.import_tasks(import_path, merge=merge)
+        
+        if imported_count is not None:
+            return jsonify({
+                'success': True,
+                'message': f'Successfully imported {imported_count} tasks',
+                'imported_count': imported_count,
+                'total_tasks': len(scheduler.tasks),
+                'merge': merge
+            })
+        else:
+            return jsonify({'error': 'Failed to import tasks'}), 500
+    
+    except Exception as e:
+        logger.error(f"Error in import endpoint: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/tasks/cleanup', methods=['POST'])
+def cleanup_old_tasks():
+    """Clean up old completed/failed tasks"""
+    try:
+        data = request.get_json() or {}
+        days = data.get('days', 30)
+        
+        removed_count = scheduler.cleanup_old_tasks(days=days)
+        
+        return jsonify({
+            'success': True,
+            'message': f'Cleaned up {removed_count} old tasks',
+            'removed_count': removed_count,
+            'remaining_tasks': len(scheduler.tasks)
+        })
+    
+    except Exception as e:
+        logger.error(f"Error in cleanup endpoint: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/execute', methods=['POST'])
 def execute_command():
     """Execute kubectl command directly"""
@@ -681,13 +2783,92 @@ def execute_command():
 
 @app.route('/api/logs', methods=['GET'])
 def get_logs():
-    """Get execution logs"""
+    """Get execution logs with filtering"""
     try:
         limit = request.args.get('limit', 50, type=int)
-        logs = scheduler.task_history[-limit:]
-        return jsonify(logs)
+        task_id = request.args.get('task_id')
+        namespace = request.args.get('namespace')
+        cost_center = request.args.get('cost_center')
+        success = request.args.get('success')
+        
+        logs = scheduler.task_history
+        
+        # Apply filters
+        if task_id:
+            logs = [log for log in logs if log.get('task_id') == task_id]
+        if namespace:
+            logs = [log for log in logs if log.get('namespace') == namespace]
+        if cost_center:
+            logs = [log for log in logs if log.get('cost_center') == cost_center]
+        if success is not None:
+            success_bool = success.lower() == 'true'
+            logs = [log for log in logs if log.get('success') == success_bool]
+        
+        # Return last N logs
+        logs = logs[-limit:]
+        
+        return jsonify({
+            'logs': logs,
+            'total': len(logs),
+            'limit': limit
+        })
     except Exception as e:
         logger.error(f"Error getting logs: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/logs/file', methods=['GET'])
+def get_log_file():
+    """Get logs from log file"""
+    try:
+        lines = request.args.get('lines', 100, type=int)
+        log_file = os.getenv('LOG_FILE', '/app/logs/app.log')
+        
+        if not os.path.exists(log_file):
+            return jsonify({'error': 'Log file not found'}), 404
+        
+        # Read last N lines
+        with open(log_file, 'r') as f:
+            all_lines = f.readlines()
+            last_lines = all_lines[-lines:]
+        
+        return jsonify({
+            'lines': last_lines,
+            'total_lines': len(last_lines),
+            'file': log_file
+        })
+    except Exception as e:
+        logger.error(f"Error reading log file: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/logs/level', methods=['GET'])
+def get_log_level():
+    """Get current log level"""
+    return jsonify({
+        'level': logging.getLevelName(logger.level),
+        'numeric_level': logger.level
+    })
+
+@app.route('/api/logs/level', methods=['POST'])
+def set_log_level():
+    """Set log level dynamically"""
+    try:
+        data = request.get_json()
+        level = data.get('level', 'INFO').upper()
+        
+        valid_levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
+        if level not in valid_levels:
+            return jsonify({'error': f'Invalid log level. Must be one of: {valid_levels}'}), 400
+        
+        logger.setLevel(getattr(logging, level))
+        
+        logger.info(f"Log level changed to {level}")
+        
+        return jsonify({
+            'message': f'Log level set to {level}',
+            'level': level
+        })
+    except Exception as e:
+        logger.error(f"Error setting log level: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/cluster/info', methods=['GET'])
@@ -722,8 +2903,9 @@ def activate_namespace(namespace):
         data = request.get_json() or {}
         cost_center = data.get('cost_center', 'default')
         user_id = data.get('user_id', 'anonymous')
+        requested_by = data.get('requested_by', user_id)  # Capture requested_by
         
-        result = scheduler.activate_namespace(namespace, cost_center, user_id)
+        result = scheduler.activate_namespace(namespace, cost_center, user_id, requested_by)
         
         if result['success']:
             return jsonify(result), 200
@@ -741,8 +2923,9 @@ def deactivate_namespace(namespace):
         data = request.get_json() or {}
         cost_center = data.get('cost_center', 'default')
         user_id = data.get('user_id', 'anonymous')
+        requested_by = data.get('requested_by', user_id)  # Capture requested_by
         
-        result = scheduler.deactivate_namespace(namespace, cost_center, user_id)
+        result = scheduler.deactivate_namespace(namespace, cost_center, user_id, requested_by)
         
         if result['success']:
             return jsonify(result), 200
@@ -755,7 +2938,7 @@ def deactivate_namespace(namespace):
 
 @app.route('/api/namespaces/status', methods=['GET'])
 def get_namespaces_status():
-    """Get status of all namespaces"""
+    """Get status of all namespaces with accurate active counting"""
     try:
         # Get all namespaces
         result = scheduler.execute_kubectl_command('get namespaces -o json')
@@ -764,29 +2947,31 @@ def get_namespaces_status():
         
         namespaces_data = json.loads(result['stdout'])
         namespace_status = []
+        total_active_count = 0
+        user_namespaces_active = 0
         
         for item in namespaces_data['items']:
             namespace_name = item['metadata']['name']
             
-            # Check if namespace has active resources
-            pods_result = scheduler.execute_kubectl_command(f'get pods -n {namespace_name} --field-selector=status.phase=Running -o json')
-            active_pods = 0
+            # Get detailed namespace information
+            details = scheduler.get_namespace_details(namespace_name)
+            namespace_status.append(details)
             
-            if pods_result['success']:
-                pods_data = json.loads(pods_result['stdout'])
-                active_pods = len(pods_data.get('items', []))
-            
-            namespace_status.append({
-                'name': namespace_name,
-                'active_pods': active_pods,
-                'is_active': active_pods > 0,
-                'is_system': namespace_name in ['kube-system', 'kube-public', 'kube-node-lease', 'default']
-            })
+            # Count active namespaces
+            if details['is_active']:
+                total_active_count += 1
+                # Count non-system namespaces separately
+                if not details['is_system']:
+                    user_namespaces_active += 1
         
         return jsonify({
             'namespaces': namespace_status,
-            'active_count': scheduler.active_namespaces_count,
-            'is_non_business_hours': scheduler.is_non_business_hours()
+            'total_active_count': total_active_count,
+            'user_namespaces_active': user_namespaces_active,
+            'active_count': user_namespaces_active,  # For backward compatibility
+            'is_non_business_hours': scheduler.is_non_business_hours(),
+            'max_allowed_during_non_business': 5,
+            'limit_applies': scheduler.is_non_business_hours()
         })
         
     except Exception as e:
@@ -808,6 +2993,54 @@ def get_cost_centers():
         return jsonify(cost_centers)
     except Exception as e:
         logger.error(f"Error getting cost centers: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/cost-centers/<cost_center>/validate', methods=['GET'])
+def validate_cost_center(cost_center):
+    """Validate if a cost center has permissions"""
+    try:
+        # Get optional audit parameters from query string
+        user_id = request.args.get('user_id', 'api_request')
+        requested_by = request.args.get('requested_by', user_id)  # Capture requested_by
+        operation_type = request.args.get('operation_type', 'permission_check')
+        namespace = request.args.get('namespace')
+        
+        is_authorized = scheduler.dynamodb_manager.validate_cost_center_permissions(
+            cost_center,
+            user_id=user_id,
+            requested_by=requested_by,
+            operation_type=operation_type,
+            namespace=namespace,
+            cluster_name=scheduler.cluster_name
+        )
+        
+        # Get additional details if authorized
+        details = None
+        if is_authorized:
+            try:
+                response = scheduler.dynamodb_manager.permissions_table.get_item(
+                    Key={'cost_center': cost_center}
+                )
+                if 'Item' in response:
+                    details = {
+                        'cost_center': cost_center,
+                        'is_authorized': response['Item'].get('is_authorized', False),
+                        'max_concurrent_namespaces': response['Item'].get('max_concurrent_namespaces', 5),
+                        'authorized_namespaces': response['Item'].get('authorized_namespaces', []),
+                        'created_at': response['Item'].get('created_at'),
+                        'updated_at': response['Item'].get('updated_at')
+                    }
+            except Exception as e:
+                logger.warning(f"Could not fetch details for cost center {cost_center}: {e}")
+        
+        return jsonify({
+            'cost_center': cost_center,
+            'is_authorized': is_authorized,
+            'details': details
+        })
+        
+    except Exception as e:
+        logger.error(f"Error validating cost center {cost_center}: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/cost-centers/<cost_center>/permissions', methods=['POST'])
@@ -856,9 +3089,224 @@ def get_activities():
         logger.error(f"Error getting activities: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/audit/user/<requested_by>', methods=['GET'])
+def get_activities_by_user(requested_by):
+    """Get activities by user (requested_by) for audit purposes"""
+    try:
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        limit = request.args.get('limit', 100, type=int)
+        
+        # Validate limit
+        if limit > 1000:
+            limit = 1000
+        elif limit < 1:
+            limit = 1
+        
+        # Parse dates
+        if start_date:
+            try:
+                start_date = datetime.fromisoformat(start_date)
+            except ValueError:
+                return jsonify({'error': 'Invalid start_date format. Use ISO format (YYYY-MM-DDTHH:MM:SS)'}), 400
+        
+        if end_date:
+            try:
+                end_date = datetime.fromisoformat(end_date)
+            except ValueError:
+                return jsonify({'error': 'Invalid end_date format. Use ISO format (YYYY-MM-DDTHH:MM:SS)'}), 400
+        
+        # Validate date range
+        if start_date and end_date and start_date > end_date:
+            return jsonify({'error': 'start_date cannot be after end_date'}), 400
+        
+        activities = scheduler.dynamodb_manager.get_activities_by_user(
+            requested_by, start_date, end_date, limit
+        )
+        
+        # Add summary statistics
+        summary = {
+            'total_activities': len(activities),
+            'user': requested_by,
+            'date_range': {
+                'start': start_date.isoformat() if start_date else None,
+                'end': end_date.isoformat() if end_date else None
+            },
+            'limit_applied': limit
+        }
+        
+        # Calculate operation type counts
+        operation_counts = {}
+        for activity in activities:
+            op_type = activity.get('operation_type', 'unknown')
+            operation_counts[op_type] = operation_counts.get(op_type, 0) + 1
+        
+        summary['operation_counts'] = operation_counts
+        
+        return jsonify({
+            'summary': summary,
+            'activities': activities
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting activities by user {requested_by}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/audit/cluster/<cluster_name>', methods=['GET'])
+def get_activities_by_cluster(cluster_name):
+    """Get activities by cluster for audit purposes"""
+    try:
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        limit = request.args.get('limit', 100, type=int)
+        
+        # Validate limit
+        if limit > 1000:
+            limit = 1000
+        elif limit < 1:
+            limit = 1
+        
+        # Parse dates
+        if start_date:
+            try:
+                start_date = datetime.fromisoformat(start_date)
+            except ValueError:
+                return jsonify({'error': 'Invalid start_date format. Use ISO format (YYYY-MM-DDTHH:MM:SS)'}), 400
+        
+        if end_date:
+            try:
+                end_date = datetime.fromisoformat(end_date)
+            except ValueError:
+                return jsonify({'error': 'Invalid end_date format. Use ISO format (YYYY-MM-DDTHH:MM:SS)'}), 400
+        
+        # Validate date range
+        if start_date and end_date and start_date > end_date:
+            return jsonify({'error': 'start_date cannot be after end_date'}), 400
+        
+        activities = scheduler.dynamodb_manager.get_activities_by_cluster(
+            cluster_name, start_date, end_date, limit
+        )
+        
+        # Add summary statistics
+        summary = {
+            'total_activities': len(activities),
+            'cluster': cluster_name,
+            'date_range': {
+                'start': start_date.isoformat() if start_date else None,
+                'end': end_date.isoformat() if end_date else None
+            },
+            'limit_applied': limit
+        }
+        
+        # Calculate operation type counts
+        operation_counts = {}
+        user_counts = {}
+        cost_center_counts = {}
+        
+        for activity in activities:
+            # Count by operation type
+            op_type = activity.get('operation_type', 'unknown')
+            operation_counts[op_type] = operation_counts.get(op_type, 0) + 1
+            
+            # Count by user
+            user = activity.get('requested_by', 'unknown')
+            user_counts[user] = user_counts.get(user, 0) + 1
+            
+            # Count by cost center
+            cost_center = activity.get('cost_center', 'unknown')
+            cost_center_counts[cost_center] = cost_center_counts.get(cost_center, 0) + 1
+        
+        summary['operation_counts'] = operation_counts
+        summary['user_counts'] = user_counts
+        summary['cost_center_counts'] = cost_center_counts
+        
+        return jsonify({
+            'summary': summary,
+            'activities': activities
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting activities by cluster {cluster_name}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/audit/summary', methods=['GET'])
+def get_audit_summary():
+    """Get audit summary with overall statistics"""
+    try:
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        
+        # Parse dates
+        if start_date:
+            try:
+                start_date = datetime.fromisoformat(start_date)
+            except ValueError:
+                return jsonify({'error': 'Invalid start_date format. Use ISO format (YYYY-MM-DDTHH:MM:SS)'}), 400
+        
+        if end_date:
+            try:
+                end_date = datetime.fromisoformat(end_date)
+            except ValueError:
+                return jsonify({'error': 'Invalid end_date format. Use ISO format (YYYY-MM-DDTHH:MM:SS)'}), 400
+        
+        # Validate date range
+        if start_date and end_date and start_date > end_date:
+            return jsonify({'error': 'start_date cannot be after end_date'}), 400
+        
+        # Get recent activities for summary (limit to avoid large scans)
+        summary = {
+            'date_range': {
+                'start': start_date.isoformat() if start_date else None,
+                'end': end_date.isoformat() if end_date else None
+            },
+            'message': 'Use specific endpoints (/api/audit/user/<user> or /api/audit/cluster/<cluster>) for detailed audit queries'
+        }
+        
+        return jsonify(summary)
+        
+    except Exception as e:
+        logger.error(f"Error getting audit summary: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/business-hours', methods=['GET'])
+def get_business_hours():
+    """Get business hours configuration and current status"""
+    try:
+        info = scheduler.get_business_hours_info()
+        return jsonify(info)
+        
+    except Exception as e:
+        logger.error(f"Error getting business hours info: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/cache/stats', methods=['GET'])
+def get_cache_stats():
+    """Get cache statistics"""
+    try:
+        stats = scheduler.dynamodb_manager.get_cache_stats()
+        return jsonify(stats)
+    except Exception as e:
+        logger.error(f"Error getting cache stats: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/cache/invalidate', methods=['POST'])
+def invalidate_cache():
+    """Invalidate cache for a specific cost center or all cache"""
+    try:
+        data = request.get_json() or {}
+        cost_center = data.get('cost_center')
+        
+        scheduler.dynamodb_manager.invalidate_cache(cost_center)
+        
+        if cost_center:
+            return jsonify({'message': f'Cache invalidated for cost center {cost_center}'})
+        else:
+            return jsonify({'message': 'All cache invalidated'})
+            
+    except Exception as e:
+        logger.error(f"Error invalidating cache: {e}")
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
-    # Ensure log directory exists
-    os.makedirs('/app/logs', exist_ok=True)
-    
     # Start the Flask app
-    app.run(host='0.0.0.0', port=8080, debug=False)
+    app.run(host='0.0.0.0', port=8080, debug=True, use_reloader=False)

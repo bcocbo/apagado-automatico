@@ -43,6 +43,10 @@ POST /api/tasks/{id}/run - Ejecutar tarea
 
 GET /api/logs - Obtener logs
 GET /api/activities - Obtener actividades por centro de costo
+
+GET /api/cost-centers - Listar centros de costo
+GET /api/cost-centers/{cost_center}/validate - Validar permisos de centro de costo
+POST /api/cost-centers/{cost_center}/permissions - Configurar permisos de centro de costo
 ```
 
 ### Modelo de Datos
@@ -73,12 +77,21 @@ GET /api/activities - Obtener actividades por centro de costo
   "timestamp_start": "number (range key)",
   "operation_type": "string",
   "cost_center": "string",
+  "cluster_name": "string",
+  "requested_by": "string",
+  "approved_by": "string",
   "user_id": "string",
   "status": "active|completed",
   "timestamp_end": "number",
   "duration_minutes": "number"
 }
 ```
+
+**Índices Secundarios Globales:**
+- `cost-center-timestamp-index`: Para consultas por centro de costo
+- `operation-type-timestamp-index`: Para consultas por tipo de operación
+- `cluster-timestamp-index`: Para consultas por cluster específico
+- `requested-by-timestamp-index`: Para auditoría por usuario solicitante
 
 ## Lógica de Negocio
 
@@ -144,9 +157,9 @@ env:
 - name: AWS_REGION
   value: "us-east-1"
 - name: DYNAMODB_TABLE_NAME
-  value: "task-scheduler-logs"
+  value: "task-scheduler-logs-production"
 - name: PERMISSIONS_TABLE_NAME
-  value: "cost-center-permissions"
+  value: "cost-center-permissions-production"
 ```
 
 ## Pipeline de CI/CD

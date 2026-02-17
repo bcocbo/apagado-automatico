@@ -89,55 +89,102 @@
                 <div class="col-md-4">
                     <div class="card">
                         <div class="card-header">
-                            <h5>Nueva Tarea</h5>
+                            <h5>Nueva Tarea Programada</h5>
                         </div>
                         <div class="card-body">
                             <form id="task-form">
                                 <div class="mb-3">
-                                    <label for="task-name" class="form-label">Nombre de la Tarea</label>
-                                    <input type="text" class="form-control" id="task-name" required>
+                                    <label for="task-name" class="form-label">Nombre de la Tarea <span class="text-danger">*</span></label>
+                                    <input type="text" class="form-control" id="task-name" placeholder="Ej: Activar namespace desarrollo" required>
+                                    <small class="form-text text-muted">Nombre descriptivo para identificar la tarea</small>
                                 </div>
+                                
                                 <div class="mb-3">
-                                    <label for="task-type" class="form-label">Tipo de Tarea</label>
-                                    <select class="form-control" id="task-type" onchange="toggleTaskFields()">
-                                        <option value="command">Comando kubectl</option>
+                                    <label for="task-description" class="form-label">Descripción</label>
+                                    <textarea class="form-control" id="task-description" rows="2" placeholder="Descripción opcional de la tarea"></textarea>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="task-type" class="form-label">Tipo de Operación <span class="text-danger">*</span></label>
+                                    <select class="form-control" id="task-type" onchange="toggleTaskFields()" required>
                                         <option value="activate">Activar Namespace</option>
                                         <option value="deactivate">Desactivar Namespace</option>
+                                        <option value="command">Comando kubectl personalizado</option>
                                     </select>
                                 </div>
-                                <div class="mb-3" id="command-field">
+                                
+                                <div class="mb-3" id="command-field" style="display: none;">
                                     <label for="task-command" class="form-label">Comando kubectl</label>
                                     <textarea class="form-control" id="task-command" rows="3" placeholder="kubectl get pods -n default"></textarea>
+                                    <small class="form-text text-muted">Comando kubectl a ejecutar</small>
                                 </div>
+                                
                                 <div class="mb-3">
-                                    <label for="task-schedule" class="form-label">Programación (Cron)</label>
+                                    <label for="task-namespace" class="form-label">Namespace <span class="text-danger">*</span></label>
+                                    <select class="form-control" id="task-namespace" required>
+                                        <option value="">Cargando...</option>
+                                    </select>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="task-schedule" class="form-label">
+                                        Programación (Cron) <span class="text-danger">*</span>
+                                        <button type="button" class="btn btn-sm btn-link p-0 ms-1" data-bs-toggle="collapse" data-bs-target="#cronHelp">
+                                            <i class="fas fa-question-circle"></i> Ayuda
+                                        </button>
+                                    </label>
                                     <input type="text" class="form-control" id="task-schedule" placeholder="0 */6 * * *" required>
-                                    <div class="form-text">
-                                        <small>Ejemplos: "0 20 * * 1-5" (8pm días laborales), "0 7 * * 1-5" (7am días laborales)</small>
+                                    
+                                    <div class="collapse mt-2" id="cronHelp">
+                                        <div class="card card-body bg-light">
+                                            <small><strong>Formato:</strong> minuto hora día mes día-semana</small>
+                                            <hr class="my-2">
+                                            <small><strong>Ejemplos comunes:</strong></small>
+                                            <ul class="mb-0 mt-1" style="font-size: 0.85rem;">
+                                                <li><code>0 7 * * 1-5</code> - 7:00 AM días laborales (Lun-Vie)</li>
+                                                <li><code>0 20 * * 1-5</code> - 8:00 PM días laborales</li>
+                                                <li><code>0 */6 * * *</code> - Cada 6 horas</li>
+                                                <li><code>*/30 * * * *</code> - Cada 30 minutos</li>
+                                                <li><code>0 0 * * 0</code> - Medianoche cada domingo</li>
+                                                <li><code>0 12 1 * *</code> - Mediodía el primer día de cada mes</li>
+                                            </ul>
+                                        </div>
                                     </div>
+                                    
+                                    <div id="cron-validation-feedback" class="mt-1"></div>
                                 </div>
+                                
                                 <div class="mb-3">
-                                    <label for="task-namespace" class="form-label">Namespace</label>
-                                    <select class="form-control" id="task-namespace">
-                                        <option value="default">default</option>
-                                    </select>
+                                    <label for="task-cost-center" class="form-label">Centro de Costo <span class="text-danger">*</span></label>
+                                    <div class="input-group">
+                                        <select class="form-control" id="task-cost-center" required>
+                                            <option value="">Seleccionar...</option>
+                                            <option value="default">default</option>
+                                            <option value="development">development</option>
+                                            <option value="testing">testing</option>
+                                            <option value="production">production</option>
+                                        </select>
+                                        <span class="input-group-text" id="task-cost-center-status">
+                                            <i class="fas fa-question-circle text-muted"></i>
+                                        </span>
+                                    </div>
+                                    <small class="form-text text-muted">Selecciona un centro de costo autorizado</small>
                                 </div>
-                                <div class="mb-3">
-                                    <label for="task-cost-center" class="form-label">Centro de Costo</label>
-                                    <select class="form-control" id="task-cost-center" required>
-                                        <option value="default">default</option>
-                                        <option value="development">development</option>
-                                        <option value="testing">testing</option>
-                                        <option value="production">production</option>
-                                    </select>
+                                
+                                <div class="d-grid gap-2">
+                                    <button type="submit" class="btn btn-primary" id="create-task-btn">
+                                        <i class="fas fa-plus-circle"></i> Crear Tarea
+                                    </button>
+                                    <button type="button" class="btn btn-outline-secondary" onclick="taskScheduler.resetTaskForm()">
+                                        <i class="fas fa-redo"></i> Limpiar Formulario
+                                    </button>
                                 </div>
-                                <button type="submit" class="btn btn-primary">Crear Tarea</button>
                             </form>
                         </div>
                     </div>
                     
                     <!-- Namespace Management Card -->
-                    <div class="card mt-3">
+                    <div class="card mt-3" id="namespace-management-card">
                         <div class="card-header">
                             <h5>Gestión de Namespaces</h5>
                         </div>
@@ -152,23 +199,57 @@
                             
                             <div class="mb-3">
                                 <label for="ns-select" class="form-label">Seleccionar Namespace</label>
-                                <select class="form-control" id="ns-select">
-                                    <option value="">Seleccionar...</option>
+                                <select class="form-control" id="ns-select" required>
+                                    <option value="">Cargando...</option>
                                 </select>
                             </div>
                             
                             <div class="mb-3">
                                 <label for="ns-cost-center" class="form-label">Centro de Costo</label>
-                                <select class="form-control" id="ns-cost-center">
-                                    <option value="default">default</option>
-                                    <option value="development">development</option>
-                                    <option value="testing">testing</option>
-                                </select>
+                                <div class="input-group">
+                                    <select class="form-control" id="ns-cost-center">
+                                        <option value="default">default</option>
+                                        <option value="development">development</option>
+                                        <option value="testing">testing</option>
+                                    </select>
+                                    <span class="input-group-text" id="ns-cost-center-status">
+                                        <i class="fas fa-question-circle text-muted"></i>
+                                    </span>
+                                </div>
+                                <small class="form-text text-muted">Selecciona un centro de costo autorizado</small>
                             </div>
                             
                             <div class="d-grid gap-2">
                                 <button class="btn btn-success" onclick="activateNamespace()">Activar</button>
                                 <button class="btn btn-warning" onclick="deactivateNamespace()">Desactivar</button>
+                            </div>
+                            
+                            <!-- Operation status indicator -->
+                            <div id="operation-status" class="mt-3 text-center" style="display: none;">
+                                <small class="text-muted">
+                                    <span class="spinner-border spinner-border-sm me-1"></span>
+                                    <span id="operation-status-text">Procesando...</span>
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Namespace Status List Card -->
+                    <div class="card mt-3">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <h5 class="mb-0">Estado de Namespaces</h5>
+                            <div>
+                                <small class="text-muted me-2" id="last-update-time">Nunca</small>
+                                <button class="btn btn-sm btn-outline-primary" onclick="taskScheduler.loadNamespacesStatus()">
+                                    <i class="fas fa-sync-alt"></i> Actualizar
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body p-0">
+                            <div id="namespace-status-list" class="list-group list-group-flush" style="max-height: 400px; overflow-y: auto;">
+                                <div class="list-group-item text-center text-muted">
+                                    Cargando estado de namespaces...
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -194,7 +275,7 @@
 
     <!-- Task Details Modal -->
     <div class="modal fade" id="taskModal" tabindex="-1">
-        <div class="modal-dialog">
+        <div class="modal-dialog modal-lg">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">Detalles de la Tarea</h5>
@@ -205,7 +286,104 @@
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
-                    <button type="button" class="btn btn-danger" onclick="deleteTask()">Eliminar</button>
+                    <button type="button" class="btn btn-primary" onclick="editTask()">
+                        <i class="fas fa-edit"></i> Editar
+                    </button>
+                    <button type="button" class="btn btn-danger" onclick="deleteTask()">
+                        <i class="fas fa-trash"></i> Eliminar
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Task Edit Modal -->
+    <div class="modal fade" id="taskEditModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Editar Tarea</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="task-edit-form">
+                        <input type="hidden" id="edit-task-id">
+                        
+                        <div class="mb-3">
+                            <label for="edit-task-name" class="form-label">Nombre de la Tarea <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="edit-task-name" required>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="edit-task-description" class="form-label">Descripción</label>
+                            <textarea class="form-control" id="edit-task-description" rows="2"></textarea>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="edit-task-type" class="form-label">Tipo de Operación <span class="text-danger">*</span></label>
+                            <select class="form-control" id="edit-task-type" onchange="toggleEditTaskFields()" required>
+                                <option value="activate">Activar Namespace</option>
+                                <option value="deactivate">Desactivar Namespace</option>
+                                <option value="command">Comando kubectl personalizado</option>
+                            </select>
+                        </div>
+                        
+                        <div class="mb-3" id="edit-command-field" style="display: none;">
+                            <label for="edit-task-command" class="form-label">Comando kubectl</label>
+                            <textarea class="form-control" id="edit-task-command" rows="3"></textarea>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="edit-task-namespace" class="form-label">Namespace <span class="text-danger">*</span></label>
+                            <select class="form-control" id="edit-task-namespace" required>
+                                <option value="">Seleccionar...</option>
+                            </select>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="edit-task-schedule" class="form-label">Programación (Cron) <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="edit-task-schedule" required>
+                            <div id="edit-cron-validation-feedback" class="mt-1"></div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="edit-task-cost-center" class="form-label">Centro de Costo <span class="text-danger">*</span></label>
+                            <select class="form-control" id="edit-task-cost-center" required>
+                                <option value="">Seleccionar...</option>
+                                <option value="default">default</option>
+                                <option value="development">development</option>
+                                <option value="testing">testing</option>
+                                <option value="production">production</option>
+                            </select>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" class="btn btn-primary" onclick="saveTaskEdit()">
+                        <i class="fas fa-save"></i> Guardar Cambios
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirmation Modal -->
+    <div class="modal fade" id="confirmationModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="confirmationModalTitle">Confirmar Operación</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="confirmationModalBody">
+                        ¿Está seguro de que desea realizar esta operación?
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" class="btn btn-primary" id="confirmationModalConfirm">Confirmar</button>
                 </div>
             </div>
         </div>
@@ -214,6 +392,9 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.js"></script>
     <script src="https://kit.fontawesome.com/a076d05399.js"></script>
+    <script src="api.js"></script>
+    <script src="notifications.js"></script>
+    <script src="loading.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

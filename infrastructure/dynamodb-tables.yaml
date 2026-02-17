@@ -1,0 +1,123 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'DynamoDB tables for Namespace Scheduler'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: 'production'
+    Description: 'Environment name'
+
+Resources:
+  TaskSchedulerLogsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'task-scheduler-logs-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: namespace_name
+          AttributeType: S
+        - AttributeName: timestamp_start
+          AttributeType: N
+        - AttributeName: cost_center
+          AttributeType: S
+        - AttributeName: operation_type
+          AttributeType: S
+        - AttributeName: cluster_name
+          AttributeType: S
+        - AttributeName: requested_by
+          AttributeType: S
+      KeySchema:
+        - AttributeName: namespace_name
+          KeyType: HASH
+        - AttributeName: timestamp_start
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        # GSI para consultar por centro de costo y timestamp
+        - IndexName: cost-center-timestamp-index
+          KeySchema:
+            - AttributeName: cost_center
+              KeyType: HASH
+            - AttributeName: timestamp_start
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        # GSI para consultar por tipo de operación y timestamp
+        - IndexName: operation-type-timestamp-index
+          KeySchema:
+            - AttributeName: operation_type
+              KeyType: HASH
+            - AttributeName: timestamp_start
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        # GSI para consultar por cluster y timestamp
+        - IndexName: cluster-timestamp-index
+          KeySchema:
+            - AttributeName: cluster_name
+              KeyType: HASH
+            - AttributeName: timestamp_start
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        # GSI para consultar por usuario solicitante y timestamp
+        - IndexName: requested-by-timestamp-index
+          KeySchema:
+            - AttributeName: requested_by
+              KeyType: HASH
+            - AttributeName: timestamp_start
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Project
+          Value: namespace-scheduler
+        - Key: Environment
+          Value: !Ref Environment
+
+  CostCenterPermissionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'cost-center-permissions-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: cost_center
+          AttributeType: S
+      KeySchema:
+        - AttributeName: cost_center
+          KeyType: HASH
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Project
+          Value: namespace-scheduler
+        - Key: Environment
+          Value: !Ref Environment
+
+Outputs:
+  TaskSchedulerLogsTableName:
+    Description: 'Name of the task scheduler logs table'
+    Value: !Ref TaskSchedulerLogsTable
+    Export:
+      Name: !Sub '${AWS::StackName}-TaskSchedulerLogsTable'
+  
+  TaskSchedulerLogsTableArn:
+    Description: 'ARN of the task scheduler logs table'
+    Value: !GetAtt TaskSchedulerLogsTable.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-TaskSchedulerLogsTableArn'
+
+  CostCenterPermissionsTableName:
+    Description: 'Name of the cost center permissions table'
+    Value: !Ref CostCenterPermissionsTable
+    Export:
+      Name: !Sub '${AWS::StackName}-CostCenterPermissionsTable'
+  
+  CostCenterPermissionsTableArn:
+    Description: 'ARN of the cost center permissions table'
+    Value: !GetAtt CostCenterPermissionsTable.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-CostCenterPermissionsTableArn'

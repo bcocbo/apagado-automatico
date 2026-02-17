@@ -69,13 +69,25 @@ spec:
         - containerPort: 8080
         env:
         - name: EKS_CLUSTER_NAME
-          value: "poc-kafka"
+          value: "eks-cloud"
         - name: AWS_REGION
           value: "us-east-1"
         - name: DYNAMODB_TABLE_NAME
-          value: "task-scheduler-logs"
+          value: "task-scheduler-logs-production"
         - name: PERMISSIONS_TABLE_NAME
-          value: "cost-center-permissions"
+          value: "cost-center-permissions-production"
+        - name: BUSINESS_HOURS_TIMEZONE
+          value: "America/Bogota"
+        - name: BUSINESS_START_HOUR
+          value: "8"
+        - name: BUSINESS_END_HOUR
+          value: "18"
+        - name: BUSINESS_HOLIDAYS
+          value: ""
+        - name: BUSINESS_HOLIDAYS_COUNTRY
+          value: "CO"
+        - name: BUSINESS_HOLIDAYS_SUBDIVISION
+          value: ""
         resources:
           requests:
             memory: "256Mi"

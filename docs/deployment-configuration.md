@@ -57,9 +57,139 @@ GitHub Actions actualiza automáticamente los image tags en el mismo repositorio
 4. **Deploy**: ArgoCD syncs the production overlay to the cluster
 5. **Result**: Kustomize applies the overlay, replacing generic names with ECR URLs and specific tags
 
+## Infrastructure Components
+
+### DynamoDB Tables
+The project uses DynamoDB for persistent storage of logs and configuration:
+- **CloudFormation template**: `infrastructure/dynamodb-tables.yaml`
+- **Main table**: `task-scheduler-logs-{environment}`
+- **Deployment**: Deploy infrastructure before application using CloudFormation
+
+```bash
+# Deploy DynamoDB infrastructure
+aws cloudformation deploy \
+  --template-file infrastructure/dynamodb-tables.yaml \
+  --stack-name namespace-scheduler-dynamodb \
+  --parameter-overrides Environment=production
+```
+
+### Kubernetes RBAC
+The kubectl-runner service requires specific RBAC permissions to manage namespaces and resources:
+- **Configuration**: `manifests/base/kubectl-runner-rbac.yaml`
+- **Documentation**: See [kubernetes-rbac-configuration.md](kubernetes-rbac-configuration.md) for detailed RBAC setup
+- **Security**: Current configuration uses broad permissions and requires review (Task 1.4)
+
+### Rollback System
+The backend implements automatic rollback for scaling operations to ensure atomicity:
+- **Documentation**: See [rollback-implementation.md](rollback-implementation.md) for detailed rollback behavior
+- **Features**:
+  - Automatic rollback on partial failures during scaling operations
+  - Tracks all successful operations for potential reversion
+  - Detailed logging and audit trail of rollback operations
+  - Configurable rollback behavior (can be disabled for testing)
+- **Guarantees**: Either all resources scale successfully, or all are reverted to original state
+
+### Initial Data Population
+A Kubernetes Job is provided to populate the cost-center-permissions table with initial data:
+- **Job manifest**: `manifests/base/populate-permissions-job.yaml`
+- **Execution**: Run `kubectl apply -f manifests/base/populate-permissions-job.yaml`
+- **Features**:
+  - Uses `python:3.11-slim` image with boto3
+  - Runs with `kubectl-runner` ServiceAccount (has IAM permissions for DynamoDB)
+  - Auto-cleanup after 5 minutes (ttlSecondsAfterFinished: 300)
+  - Idempotent: won't overwrite existing records
+  - Populates 6 default cost centers (5 authorized, 1 disabled)
+- **Documentation**: See [cost-center-permissions-setup.md](cost-center-permissions-setup.md) for details
+
+### IAM Integration
+EKS integration with AWS services requires proper IAM configuration:
+- **Service Account**: Annotated with IAM role ARN for AWS access
+- **Documentation**: See [eks-iam-configuration.md](eks-iam-configuration.md) for IAM setup
+
+## Environment Configuration
+
+### Production Environment Variables
+The production overlay configures the backend with the following environment variables:
+
+```yaml
+env:
+- name: EKS_CLUSTER_NAME
+  value: "eks-cloud"
+- name: AWS_REGION
+  value: "us-east-1"
+- name: DYNAMODB_TABLE_NAME
+  value: "task-scheduler-logs-production"
+- name: PERMISSIONS_TABLE_NAME
+  value: "cost-center-permissions-production"
+- name: PERMISSIONS_CACHE_ENABLED
+  value: "true"
+- name: PERMISSIONS_CACHE_TTL
+  value: "300"
+- name: LOG_LEVEL
+  value: "INFO"
+- name: LOG_FORMAT
+  value: "json"
+- name: LOG_FILE
+  value: "/app/logs/app.log"
+```
+
+These variables are set in `manifests/overlays/production/task-scheduler-patch.yaml` and provide:
+- **EKS_CLUSTER_NAME**: Identifies the target cluster for operations
+- **AWS_REGION**: AWS region for DynamoDB and other AWS service calls
+- **DYNAMODB_TABLE_NAME**: Production table for task execution logs (includes "-production" suffix)
+- **PERMISSIONS_TABLE_NAME**: Production table for cost center permissions (includes "-production" suffix)
+- **PERMISSIONS_CACHE_ENABLED**: Enable/disable permissions caching (default: "true")
+- **PERMISSIONS_CACHE_TTL**: Cache time-to-live in seconds (default: 300 = 5 minutes)
+- **LOG_LEVEL**: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL) - default: "INFO"
+- **LOG_FORMAT**: Log output format ("json" or "text") - default: "json"
+- **LOG_FILE**: Path to log file - default: "/app/logs/app.log"
+
+**Note**: The production environment uses table names with the "-production" suffix to separate production data from development/testing environments. This naming convention is consistent across all deployment scripts and infrastructure components.
+
+### Structured Logging
+
+The backend implements structured logging with support for JSON and text formats:
+
+- **JSON Format** (default): Machine-readable structured logs for integration with CloudWatch, ELK, Splunk
+- **Text Format**: Human-readable logs for local development
+- **Request Tracing**: Automatic request ID generation and correlation across log entries
+- **Log Rotation**: Automatic rotation at 10 MB with 5 backup files retained
+- **Contextual Fields**: Automatic capture of user, namespace, cost center, cluster, and operation metadata
+
+For detailed configuration and usage, see [Structured Logging Configuration](structured-logging-configuration.md).
+
+### Permissions Cache
+
+The backend implements an in-memory cache for cost center permissions to reduce DynamoDB read operations and improve performance:
+
+- **Cache TTL**: Configurable via `PERMISSIONS_CACHE_TTL` (default: 300 seconds / 5 minutes)
+- **Cache Control**: Can be enabled/disabled via `PERMISSIONS_CACHE_ENABLED` environment variable
+- **Cache Invalidation**: Automatically invalidated when permissions are updated via API
+- **Negative Caching**: Failed lookups are also cached to prevent repeated queries for non-existent cost centers
+- **Cache Stats**: Available via `/api/cache/stats` endpoint for monitoring
+
+Benefits:
+- Reduces DynamoDB read costs
+- Improves response time for permission checks
+- Reduces load on DynamoDB during high-traffic periods
+
 ## Configuration Files
 
+- **Infrastructure**: `infrastructure/dynamodb-tables.yaml`
 - **Base deployment**: `manifests/base/task-scheduler-deployment.yaml`
 - **Base kustomization**: `manifests/base/kustomization.yaml`
+- **RBAC configuration**: `manifests/base/kubectl-runner-rbac.yaml`
+- **Data population job**: `manifests/base/populate-permissions-job.yaml`
 - **Production overlay**: `manifests/overlays/production/kustomization.yaml`
+- **Production patches**: `manifests/overlays/production/task-scheduler-patch.yaml`
 - **ArgoCD app**: `argocd/namespace-scheduler-app.yaml`
+
+## Related Documentation
+
+- [Local Development Setup](local-development-setup.md) - Running the backend locally for development
+- [Structured Logging Configuration](structured-logging-configuration.md) - Logging setup and configuration
+- [Kubernetes RBAC Configuration](kubernetes-rbac-configuration.md) - RBAC permissions setup
+- [EKS IAM Configuration](eks-iam-configuration.md) - IAM roles and policies
+- [Cost Center Permissions Setup](cost-center-permissions-setup.md) - Permissions table setup
+- [Rollback Implementation](rollback-implementation.md) - Automatic rollback behavior
+- [DynamoDB Table Design](dynamodb-table-design.md) - Database schema and indexes

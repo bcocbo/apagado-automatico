@@ -1,0 +1,132 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: test-dynamodb-connectivity
+  namespace: task-scheduler
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app: test-connectivity
+    spec:
+      serviceAccountName: kubectl-runner
+      restartPolicy: Never
+      containers:
+      - name: test-connectivity
+        image: python:3.11-slim
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -e
+          echo "📦 Instalando dependencias..."
+          pip install boto3 --quiet
+          
+          echo "🔍 Probando conectividad a DynamoDB..."
+          python3 << 'EOFSCRIPT'
+          import boto3
+          import os
+          import time
+          import uuid
+          
+          AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
+          
+          print("\n🔐 Verificando credenciales AWS...")
+          try:
+              sts = boto3.client('sts', region_name=AWS_REGION)
+              identity = sts.get_caller_identity()
+              print(f"✅ Identidad AWS: {identity.get('Arn', 'Unknown')}")
+          except Exception as e:
+              print(f"❌ Error obteniendo identidad: {e}")
+              exit(1)
+          
+          print("\n🗄️  Probando acceso a tablas DynamoDB...")
+          
+          # Probar tabla de logs
+          try:
+              dynamodb = boto3.resource('dynamodb', region_name=AWS_REGION)
+              table_name = 'task-scheduler-logs-production'
+              table = dynamodb.Table(table_name)
+              table.load()
+              print(f"✅ Tabla {table_name} accesible")
+              print(f"   Estado: {table.table_status}")
+              print(f"   Items: {table.item_count}")
+          except Exception as e:
+              print(f"❌ Error accediendo a tabla {table_name}: {e}")
+              exit(1)
+          
+          # Probar tabla de permisos
+          try:
+              table_name = 'cost-center-permissions-production'
+              table = dynamodb.Table(table_name)
+              table.load()
+              print(f"✅ Tabla {table_name} accesible")
+              print(f"   Estado: {table.table_status}")
+              print(f"   Items: {table.item_count}")
+          except Exception as e:
+              print(f"❌ Error accediendo a tabla {table_name}: {e}")
+              exit(1)
+          
+          print("\n🧪 Probando operaciones básicas...")
+          
+          # Probar operaciones CRUD
+          try:
+              table_name = 'task-scheduler-logs-production'
+              table = dynamodb.Table(table_name)
+              
+              # Crear un item de prueba
+              test_item = {
+                  'namespace_name': 'test-connectivity',
+                  'timestamp_start': int(time.time()),
+                  'operation_type': 'connectivity_test',
+                  'cost_center': 'test',
+                  'cluster_name': 'test-cluster',
+                  'requested_by': 'connectivity-test',
+                  'status': 'active',
+                  'id': str(uuid.uuid4())
+              }
+              
+              # Insertar item
+              table.put_item(Item=test_item)
+              print("✅ Item de prueba insertado")
+              
+              # Leer item
+              response = table.get_item(
+                  Key={
+                      'namespace_name': test_item['namespace_name'],
+                      'timestamp_start': test_item['timestamp_start']
+                  }
+              )
+              
+              if 'Item' in response:
+                  print("✅ Item de prueba leído exitosamente")
+                  
+                  # Eliminar item de prueba
+                  table.delete_item(
+                      Key={
+                          'namespace_name': test_item['namespace_name'],
+                          'timestamp_start': test_item['timestamp_start']
+                      }
+                  )
+                  print("✅ Item de prueba eliminado")
+              else:
+                  print("❌ No se pudo leer el item de prueba")
+                  exit(1)
+                  
+          except Exception as e:
+              print(f"❌ Error en operaciones DynamoDB: {e}")
+              exit(1)
+          
+          print("\n✅ Prueba de conectividad completada exitosamente!")
+          print("\n📋 Resumen:")
+          print("   - Credenciales AWS: ✅ Funcionando")
+          print("   - Tabla task-scheduler-logs-production: ✅ Accesible")
+          print("   - Tabla cost-center-permissions-production: ✅ Accesible")
+          print("   - Operaciones DynamoDB (PUT/GET/DELETE): ✅ Funcionando")
+          EOFSCRIPT
+        env:
+        - name: AWS_REGION
+          value: "us-east-1"
+        - name: AWS_DEFAULT_REGION
+          value: "us-east-1"
