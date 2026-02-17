@@ -2,7 +2,6 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: kubectl-runner
-  namespace: task-scheduler
   annotations:
     eks.amazonaws.com/role-arn: arn:aws:iam::226633502530:role/kubectl-runner-role
 ---
@@ -97,7 +96,7 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: kubectl-runner
-  namespace: task-scheduler
+  namespace: task-scheduler  # ClusterRoleBindings need explicit namespace
 ---
 # RoleBindings en namespaces protegidos (SOLO LECTURA)
 # Estos RoleBindings sobrescriben el ClusterRoleBinding de scale en namespaces críticos
@@ -164,11 +163,11 @@ subjects:
   namespace: task-scheduler
 ---
 # RoleBinding en task-scheduler (SOLO LECTURA - protegido)
+# Note: namespace will be added by kustomization.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: kubectl-runner-readonly
-  namespace: task-scheduler
+  name: kubectl-runner-readonly-self
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -176,7 +175,6 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: kubectl-runner
-  namespace: task-scheduler
 ---
 # RoleBinding en kube-public (SOLO LECTURA - protegido)
 apiVersion: rbac.authorization.k8s.io/v1
@@ -268,4 +266,4 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: kubectl-runner
-  namespace: task-scheduler
+  namespace: task-scheduler  # ClusterRoleBindings need explicit namespace
