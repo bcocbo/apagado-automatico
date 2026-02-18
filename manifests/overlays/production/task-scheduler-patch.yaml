@@ -5,6 +5,10 @@ metadata:
   namespace: task-scheduler
 spec:
   template:
+    metadata:
+      labels:
+        app: task-scheduler-frontend
+        env: production
     spec:
       containers:
       - name: frontend
@@ -23,18 +27,22 @@ metadata:
   namespace: task-scheduler
 spec:
   template:
+    metadata:
+      labels:
+        app: task-scheduler-backend
+        env: production
     spec:
       containers:
       - name: backend
         env:
         - name: EKS_CLUSTER_NAME
-          value: "eks-cloud"
+          value: "poc-kafka"
         - name: AWS_REGION
           value: "us-east-1"
         - name: DYNAMODB_TABLE_NAME
-          value: "task-scheduler-logs-production"
+          value: "task-scheduler-logs"
         - name: PERMISSIONS_TABLE_NAME
-          value: "cost-center-permissions-production"
+          value: "cost-center-permissions"
         - name: BUSINESS_HOURS_TIMEZONE
           value: "America/Bogota"
         - name: BUSINESS_START_HOUR
