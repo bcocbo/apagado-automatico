@@ -24,4 +24,4 @@ images:
   newTag: 20260218-205501
 - name: task-scheduler-backend
   newName: 226633502530.dkr.ecr.us-east-1.amazonaws.com/task-scheduler-backend
-  newTag: 20260218-205501
+  newTag: latest
