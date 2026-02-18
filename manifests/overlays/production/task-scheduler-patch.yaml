@@ -36,7 +36,7 @@ spec:
       - name: backend
         env:
         - name: EKS_CLUSTER_NAME
-          value: "poc-kafka"
+          value: "eks-cloud"
         - name: AWS_REGION
           value: "us-east-1"
         - name: DYNAMODB_TABLE_NAME
