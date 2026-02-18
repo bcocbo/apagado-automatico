@@ -51,7 +51,7 @@ jobs:
         tags: |
           type=ref,event=branch
           type=ref,event=pr
-          type=sha,prefix={{branch}}-
+          type=raw,value={{date 'YYYYMMDD-HHmmss' tz='UTC'}},enable={{is_default_branch}}
           type=raw,value=latest,enable={{is_default_branch}}
 
     - name: Build and push frontend
@@ -95,7 +95,7 @@ jobs:
         tags: |
           type=ref,event=branch
           type=ref,event=pr
-          type=sha,prefix={{branch}}-
+          type=raw,value={{date 'YYYYMMDD-HHmmss' tz='UTC'}},enable={{is_default_branch}}
           type=raw,value=latest,enable={{is_default_branch}}
 
     - name: Build and push backend
@@ -108,28 +108,32 @@ jobs:
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
 
-  # update-manifests:
-  #   needs: [build-frontend, build-backend]
-  #   runs-on: ubuntu-latest
-  #   if: github.ref == 'refs/heads/main'
-  #   permissions:
-  #     contents: write
-  #   steps:
-  #   - name: Checkout code
-  #     uses: actions/checkout@v4
-  #     with:
-  #       token: ${{ secrets.GITHUB_TOKEN }}
+  update-manifests:
+    needs: [build-frontend, build-backend]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
 
-  #   - name: Update image tags in kustomization
-  #     env:
-  #       IMAGE_TAG: ${{ github.sha }}
-  #     run: |
-  #       # Update image tags in kustomization
-  #       sed -i "s|newTag: .*|newTag: $IMAGE_TAG|g" manifests/overlays/production/kustomization.yaml
+    - name: Generate timestamp
+      id: timestamp
+      run: echo "timestamp=$(date -u +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
+
+    - name: Update image tags in kustomization
+      env:
+        IMAGE_TAG: ${{ steps.timestamp.outputs.timestamp }}
+      run: |
+        # Update image tags in kustomization with timestamp
+        sed -i "s|newTag: .*|newTag: $IMAGE_TAG|g" manifests/overlays/production/kustomization.yaml
         
-  #       # Commit changes
-  #       git config --local user.email "action@github.com"
-  #       git config --local user.name "GitHub Action"
-  #       git add manifests/overlays/production/kustomization.yaml
-  #       git commit -m "Update image tags to $IMAGE_TAG [skip ci]" || exit 0
-  #       git push
+        # Commit changes
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add manifests/overlays/production/kustomization.yaml
+        git commit -m "Update image tags to $IMAGE_TAG [skip ci]" || exit 0
+        git push
