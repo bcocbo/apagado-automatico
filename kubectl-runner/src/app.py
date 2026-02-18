@@ -2136,8 +2136,11 @@ class TaskScheduler:
     def execute_kubectl_command(self, command, namespace='default'):
         """Execute kubectl command"""
         try:
-            # Ensure we have proper kubeconfig
-            if not os.path.exists('/root/.kube/config'):
+            # Check if we're running in a Kubernetes pod (service account token exists)
+            in_k8s_pod = os.path.exists('/var/run/secrets/kubernetes.io/serviceaccount/token')
+            
+            # Only try to set up kubeconfig if not in a K8s pod and kubeconfig doesn't exist
+            if not in_k8s_pod and not os.path.exists('/root/.kube/config'):
                 # Try to get kubeconfig from AWS EKS
                 cluster_name = os.getenv('EKS_CLUSTER_NAME', 'default-cluster')
                 region = os.getenv('AWS_REGION', 'us-east-1')
@@ -2154,17 +2157,18 @@ class TaskScheduler:
             if '-n ' not in command and '--namespace' not in command and namespace != 'default':
                 command += f' -n {namespace}'
 
-            logger.info(f"Executing command: {command}")
+            logger.info(f"Executing command: {command} (in_k8s_pod: {in_k8s_pod})")
             
-            # Prepare environment with KUBECONFIG
+            # Prepare environment
             env = os.environ.copy()
-            if 'KUBECONFIG' not in env:
-                # Set kubeconfig to user's home directory
+            
+            # Only set KUBECONFIG if not in a K8s pod
+            if not in_k8s_pod and 'KUBECONFIG' not in env:
                 env['KUBECONFIG'] = os.path.expanduser('~/.kube/config')
             
             # Debug: Check if AWS credentials are present
             has_aws_creds = 'AWS_ACCESS_KEY_ID' in env and 'AWS_SECRET_ACCESS_KEY' in env
-            logger.info(f"Using KUBECONFIG: {env.get('KUBECONFIG')}, AWS creds present: {has_aws_creds}")
+            logger.info(f"Using KUBECONFIG: {env.get('KUBECONFIG', 'service-account-token')}, AWS creds present: {has_aws_creds}")
             
             # Execute command
             result = subprocess.run(
@@ -2172,7 +2176,7 @@ class TaskScheduler:
                 capture_output=True,
                 text=True,
                 timeout=300,  # 5 minute timeout
-                env=env  # Pass environment variables including AWS credentials and KUBECONFIG
+                env=env  # Pass environment variables
             )
 
             if result.returncode != 0:
