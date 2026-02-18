@@ -40,9 +40,9 @@ spec:
         - name: AWS_REGION
           value: "us-east-1"
         - name: DYNAMODB_TABLE_NAME
-          value: "task-scheduler-logs"
+          value: "task-scheduler-logs-production"
         - name: PERMISSIONS_TABLE_NAME
-          value: "cost-center-permissions"
+          value: "cost-center-permissions-production"
         - name: BUSINESS_HOURS_TIMEZONE
           value: "America/Bogota"
         - name: BUSINESS_START_HOUR
