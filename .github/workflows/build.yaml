@@ -23,11 +23,15 @@ jobs:
   build-frontend:
     runs-on: ubuntu-latest
     outputs:
-      image-tag: ${{ steps.meta.outputs.tags }}
+      image-tag: ${{ steps.timestamp.outputs.timestamp }}
       image-digest: ${{ steps.build.outputs.digest }}
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+
+    - name: Generate timestamp
+      id: timestamp
+      run: echo "timestamp=$(date -u +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
 
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
@@ -42,17 +46,6 @@ jobs:
     - name: Login to Amazon ECR
       id: login-ecr
       uses: aws-actions/amazon-ecr-login@v2
-
-    - name: Extract metadata for frontend
-      id: meta
-      uses: docker/metadata-action@v5
-      with:
-        images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_FRONTEND }}
-        tags: |
-          type=ref,event=branch
-          type=ref,event=pr
-          type=raw,value={{date 'YYYYMMDD-HHmmss' tz='UTC'}},enable={{is_default_branch}}
-          type=raw,value=latest,enable={{is_default_branch}}
 
     - name: Build and push frontend
       id: build
@@ -61,17 +54,22 @@ jobs:
         context: ./frontend
         file: ./frontend/Dockerfile
         push: true
-        tags: ${{ steps.meta.outputs.tags }}
-        labels: ${{ steps.meta.outputs.labels }}
+        tags: |
+          ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_FRONTEND }}:${{ steps.timestamp.outputs.timestamp }}
+          ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_FRONTEND }}:latest
 
   build-backend:
     runs-on: ubuntu-latest
     outputs:
-      image-tag: ${{ steps.meta.outputs.tags }}
+      image-tag: ${{ steps.timestamp.outputs.timestamp }}
       image-digest: ${{ steps.build.outputs.digest }}
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+
+    - name: Generate timestamp
+      id: timestamp
+      run: echo "timestamp=$(date -u +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
 
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
@@ -87,17 +85,6 @@ jobs:
       id: login-ecr
       uses: aws-actions/amazon-ecr-login@v2
 
-    - name: Extract metadata for backend
-      id: meta
-      uses: docker/metadata-action@v5
-      with:
-        images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_BACKEND }}
-        tags: |
-          type=ref,event=branch
-          type=ref,event=pr
-          type=raw,value={{date 'YYYYMMDD-HHmmss' tz='UTC'}},enable={{is_default_branch}}
-          type=raw,value=latest,enable={{is_default_branch}}
-
     - name: Build and push backend
       id: build
       uses: docker/build-push-action@v5
@@ -105,8 +92,9 @@ jobs:
         context: ./kubectl-runner
         file: ./kubectl-runner/Dockerfile
         push: true
-        tags: ${{ steps.meta.outputs.tags }}
-        labels: ${{ steps.meta.outputs.labels }}
+        tags: |
+          ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_BACKEND }}:${{ steps.timestamp.outputs.timestamp }}
+          ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_BACKEND }}:latest
 
   update-manifests:
     needs: [build-frontend, build-backend]
@@ -120,13 +108,9 @@ jobs:
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Generate timestamp
-      id: timestamp
-      run: echo "timestamp=$(date -u +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
-
     - name: Update image tags in kustomization
       env:
-        IMAGE_TAG: ${{ steps.timestamp.outputs.timestamp }}
+        IMAGE_TAG: ${{ needs.build-frontend.outputs.image-tag }}
       run: |
         # Update image tags in kustomization with timestamp
         sed -i "s|newTag: .*|newTag: $IMAGE_TAG|g" manifests/overlays/production/kustomization.yaml
