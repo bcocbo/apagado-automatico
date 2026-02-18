@@ -21,7 +21,7 @@ replicas:
 images:
 - name: task-scheduler-frontend
   newName: 226633502530.dkr.ecr.us-east-1.amazonaws.com/task-scheduler-frontend
-  newTag: bc10a2222489cee2624bbad7717e5bbf85559d30
+  newTag: 4ef5ead029dcd7755cb6f7085e19b710613ce4bf
 - name: task-scheduler-backend
   newName: 226633502530.dkr.ecr.us-east-1.amazonaws.com/task-scheduler-backend
-  newTag: bc10a2222489cee2624bbad7717e5bbf85559d30
+  newTag: 4ef5ead029dcd7755cb6f7085e19b710613ce4bf
