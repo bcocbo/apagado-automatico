@@ -98,8 +98,8 @@
 ## 4. Despliegue y CI/CD
 
 ### 4.1 Configurar ArgoCD
-- [ ] Crear ArgoCD Application para el proyecto
-- [ ] Configurar sincronización automática
+- [x] Crear ArgoCD Application para el proyecto
+- [x] Configurar sincronización automática
 - [ ] Configurar health checks apropiados
 - [ ] Implementar rollback automático en caso de fallas
 - [ ] Documentar proceso de despliegue

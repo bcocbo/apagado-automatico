@@ -16,8 +16,13 @@ Este documento describe la configuración de roles IAM necesarios para que el se
 
 ### Flujo de Autenticación
 
+El sistema soporta dos métodos de autenticación dependiendo del entorno de ejecución:
+
+#### Método 1: Service Account Token (En Pod de Kubernetes)
 ```
 Pod (kubectl-runner) 
+  ↓ (detecta /var/run/secrets/kubernetes.io/serviceaccount/token)
+Service Account Token (autenticación automática)
   ↓ (usa Service Account)
 Service Account (con anotación eks.amazonaws.com/role-arn)
   ↓ (asume rol via OIDC)
@@ -25,6 +30,42 @@ IAM Role (kubectl-runner-role)
   ↓ (tiene permisos via Policy)
 DynamoDB Tables (task-scheduler-logs, cost-center-permissions)
 ```
+
+#### Método 2: AWS EKS kubeconfig (Desarrollo Local)
+```
+Aplicación Local
+  ↓ (no encuentra service account token)
+AWS EKS update-kubeconfig
+  ↓ (configura ~/.kube/config)
+kubectl con AWS credentials
+  ↓ (acceso directo al cluster)
+EKS Cluster + DynamoDB (via AWS credentials locales)
+```
+
+## Detección Automática de Entorno
+
+El sistema detecta automáticamente el entorno de ejecución y selecciona el método de autenticación apropiado:
+
+### Detección de Pod de Kubernetes
+```python
+# Verifica si existe el token del service account
+in_k8s_pod = os.path.exists('/var/run/secrets/kubernetes.io/serviceaccount/token')
+```
+
+### Comportamiento por Entorno
+
+| Entorno | Detección | Método de Auth | Configuración |
+|---------|-----------|----------------|---------------|
+| **Pod en EKS** | Token existe | Service Account | Automático via IRSA |
+| **Desarrollo Local** | Token no existe | AWS kubeconfig | Requiere AWS credentials |
+| **CI/CD** | Token no existe | AWS kubeconfig | Requiere AWS credentials |
+
+### Ventajas de la Detección Automática
+
+1. **Sin Configuración Manual**: No requiere variables de entorno para seleccionar el método
+2. **Compatibilidad**: Funciona tanto en producción (EKS) como en desarrollo local
+3. **Seguridad**: Usa el método más seguro disponible en cada entorno
+4. **Simplicidad**: Un solo código base para todos los entornos
 
 ## Configuración Paso a Paso
 

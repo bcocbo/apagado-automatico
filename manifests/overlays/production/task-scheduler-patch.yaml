@@ -43,6 +43,8 @@ spec:
           value: "task-scheduler-logs-production"
         - name: PERMISSIONS_TABLE_NAME
           value: "cost-center-permissions-production"
+        - name: LOG_LEVEL
+          value: "WARNING"
         - name: BUSINESS_HOURS_TIMEZONE
           value: "America/Bogota"
         - name: BUSINESS_START_HOUR
@@ -50,7 +52,7 @@ spec:
         - name: BUSINESS_END_HOUR
           value: "18"
         - name: BUSINESS_HOLIDAYS
-          value: ""
+          value: "2026-01-01,2026-01-06,2026-03-23,2026-04-09,2026-04-10,2026-05-01,2026-05-25,2026-06-15,2026-06-22,2026-06-29,2026-07-20,2026-08-07,2026-08-17,2026-10-12,2026-11-02,2026-11-16,2026-12-08,2026-12-25,2027-01-01,2027-01-11,2027-03-22,2027-03-25,2027-03-26,2027-05-01,2027-05-10,2027-05-31,2027-06-07,2027-06-28,2027-07-20,2027-08-07,2027-08-16,2027-10-11,2027-11-01,2027-11-15,2027-12-08,2027-12-25"
         - name: BUSINESS_HOLIDAYS_COUNTRY
           value: "CO"
         - name: BUSINESS_HOLIDAYS_SUBDIVISION

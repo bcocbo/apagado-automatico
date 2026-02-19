@@ -33,6 +33,10 @@ python3 run-production.py
 - kubectl configured with access to the EKS cluster
 - Proper IAM permissions for DynamoDB and EKS
 
+**Note**: The application automatically detects if it's running in a Kubernetes pod (by checking for service account token) and uses the appropriate authentication method:
+- **In EKS Pod**: Uses service account token authentication (IRSA)
+- **Local Development**: Uses AWS kubeconfig authentication
+
 ### Using Bash Script
 
 The bash script sets up environment variables but doesn't patch hardcoded paths:

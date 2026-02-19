@@ -3311,6 +3311,195 @@ def invalidate_cache():
         logger.error(f"Error invalidating cache: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/tasks/batch', methods=['POST'])
+def create_batch_tasks():
+    """Create multiple tasks in batch"""
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        # Extract tasks from payload
+        tasks = data.get('tasks', [])
+        batch_create = data.get('batch_create', False)
+        source = data.get('source', 'api')
+        created_by = data.get('created_by', 'unknown')
+        
+        if not tasks:
+            return jsonify({'error': 'No tasks provided'}), 400
+        
+        if not isinstance(tasks, list):
+            return jsonify({'error': 'Tasks must be a list'}), 400
+        
+        created_tasks = []
+        failed_tasks = []
+        
+        logger.info(f"Creating batch of {len(tasks)} tasks from source: {source}")
+        
+        for i, task_data in enumerate(tasks):
+            try:
+                # Validate required fields
+                required_fields = ['title', 'operation_type', 'namespace', 'schedule', 'cost_center']
+                missing_fields = [field for field in required_fields if not task_data.get(field)]
+                
+                if missing_fields:
+                    failed_tasks.append({
+                        'index': i,
+                        'task': task_data.get('title', f'Task {i}'),
+                        'error': f'Missing required fields: {", ".join(missing_fields)}'
+                    })
+                    continue
+                
+                # Create task using existing scheduler logic
+                task_id = task_data.get('id') or scheduler.generate_id()
+                
+                # Prepare task for scheduler
+                task = {
+                    'id': task_id,
+                    'title': task_data['title'],
+                    'description': task_data.get('description', ''),
+                    'operation_type': task_data['operation_type'],
+                    'namespace': task_data['namespace'],
+                    'schedule': task_data['schedule'],
+                    'cost_center': task_data['cost_center'],
+                    'status': 'pending',
+                    'created_at': datetime.now().isoformat(),
+                    'user_id': task_data.get('user_id', created_by),
+                    'requested_by': task_data.get('requested_by', created_by),
+                    'cluster_name': task_data.get('cluster_name', scheduler.cluster_name),
+                    'auto_created': task_data.get('auto_created', batch_create),
+                    'system_task': task_data.get('system_task', False)
+                }
+                
+                # Add command if it's a command type task
+                if task_data['operation_type'] == 'command':
+                    task['command'] = task_data.get('command', '')
+                
+                # Add task to scheduler
+                scheduler.add_task(
+                    task_id=task_id,
+                    title=task['title'],
+                    schedule=task['schedule'],
+                    operation_type=task['operation_type'],
+                    namespace=task['namespace'],
+                    cost_center=task['cost_center'],
+                    command=task.get('command'),
+                    description=task.get('description'),
+                    user_id=task['user_id'],
+                    requested_by=task['requested_by']
+                )
+                
+                created_tasks.append(task)
+                logger.info(f"Created batch task {i+1}/{len(tasks)}: {task['title']}")
+                
+            except Exception as task_error:
+                logger.error(f"Error creating task {i}: {task_error}")
+                failed_tasks.append({
+                    'index': i,
+                    'task': task_data.get('title', f'Task {i}'),
+                    'error': str(task_error)
+                })
+        
+        # Save tasks if any were created successfully
+        if created_tasks:
+            scheduler.save_tasks()
+        
+        response = {
+            'message': f'Batch task creation completed',
+            'total_requested': len(tasks),
+            'created_count': len(created_tasks),
+            'failed_count': len(failed_tasks),
+            'created_tasks': created_tasks,
+            'source': source,
+            'created_by': created_by
+        }
+        
+        if failed_tasks:
+            response['failed_tasks'] = failed_tasks
+        
+        status_code = 200 if created_tasks else 400
+        
+        logger.info(f"Batch creation result: {len(created_tasks)} created, {len(failed_tasks)} failed")
+        
+        return jsonify(response), status_code
+        
+    except Exception as e:
+        logger.error(f"Error in batch task creation: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/tasks/default', methods=['POST'])
+def create_default_system_tasks():
+    """Create default system tasks for critical namespaces"""
+    try:
+        # Import the default tasks creator
+        import sys
+        import os
+        sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+        
+        from create_default_tasks import create_default_tasks
+        
+        # Generate default tasks
+        default_tasks = create_default_tasks()
+        
+        # Create batch payload
+        batch_data = {
+            'tasks': default_tasks,
+            'batch_create': True,
+            'source': 'system-default-generator',
+            'created_by': 'system-auto'
+        }
+        
+        # Use the batch creation endpoint
+        return create_batch_tasks_internal(batch_data)
+        
+    except Exception as e:
+        logger.error(f"Error creating default system tasks: {e}")
+        return jsonify({'error': str(e)}), 500
+
+def create_batch_tasks_internal(data):
+    """Internal function for batch task creation (used by other endpoints)"""
+    tasks = data.get('tasks', [])
+    created_tasks = []
+    failed_tasks = []
+    
+    for i, task_data in enumerate(tasks):
+        try:
+            task_id = task_data.get('id') or scheduler.generate_id()
+            
+            scheduler.add_task(
+                task_id=task_id,
+                title=task_data['title'],
+                schedule=task_data['schedule'],
+                operation_type=task_data['operation_type'],
+                namespace=task_data['namespace'],
+                cost_center=task_data['cost_center'],
+                command=task_data.get('command'),
+                description=task_data.get('description'),
+                user_id=task_data.get('user_id', 'system'),
+                requested_by=task_data.get('requested_by', 'system-auto')
+            )
+            
+            created_tasks.append(task_data)
+            
+        except Exception as task_error:
+            failed_tasks.append({
+                'index': i,
+                'task': task_data.get('title', f'Task {i}'),
+                'error': str(task_error)
+            })
+    
+    if created_tasks:
+        scheduler.save_tasks()
+    
+    return jsonify({
+        'message': f'Created {len(created_tasks)} default system tasks',
+        'created_count': len(created_tasks),
+        'failed_count': len(failed_tasks),
+        'created_tasks': created_tasks,
+        'failed_tasks': failed_tasks if failed_tasks else None
+    })
+
 if __name__ == '__main__':
     # Start the Flask app
     # Updated: 2026-02-18 - Force rebuild to include all latest endpoints

@@ -239,6 +239,19 @@ class APIClient {
             }
         });
     }
+
+    async createDefaultSystemTasks() {
+        return this.post('/api/tasks/default', {});
+    }
+
+    async createBatchTasks(tasks, source = 'web-ui') {
+        return this.post('/api/tasks/batch', {
+            tasks: tasks,
+            batch_create: true,
+            source: source,
+            created_by: 'web-user'
+        });
+    }
 }
 
 // Create singleton instance

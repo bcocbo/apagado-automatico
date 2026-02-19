@@ -104,9 +104,73 @@ A Kubernetes Job is provided to populate the cost-center-permissions table with 
 ### IAM Integration
 EKS integration with AWS services requires proper IAM configuration:
 - **Service Account**: Annotated with IAM role ARN for AWS access
+- **Authentication**: Automatic detection of execution environment
+  - **In EKS Pod**: Uses service account token authentication (IRSA)
+  - **Local/CI-CD**: Uses AWS kubeconfig authentication
 - **Documentation**: See [eks-iam-configuration.md](eks-iam-configuration.md) for IAM setup
 
-## Environment Configuration
+### Kubernetes Authentication
+
+The kubectl-runner backend implements automatic authentication detection:
+
+#### Service Account Token Authentication (Production)
+When running in an EKS pod, the application automatically detects the presence of the service account token at `/var/run/secrets/kubernetes.io/serviceaccount/token` and uses it for authentication. This provides:
+- **Automatic Authentication**: No manual kubeconfig setup required
+- **IRSA Integration**: Seamless integration with IAM Roles for Service Accounts
+- **Security**: Uses Kubernetes-native authentication mechanisms
+
+#### AWS kubeconfig Authentication (Development/CI-CD)
+When running outside of a Kubernetes pod (local development or CI/CD), the application:
+- Detects the absence of service account token
+- Automatically configures kubeconfig using `aws eks update-kubeconfig`
+- Uses AWS credentials for cluster access
+- Requires proper AWS IAM permissions
+
+#### Environment Detection Logic
+```python
+# Automatic detection of execution environment
+in_k8s_pod = os.path.exists('/var/run/secrets/kubernetes.io/serviceaccount/token')
+
+if not in_k8s_pod and not os.path.exists('/root/.kube/config'):
+    # Configure kubeconfig for local/CI-CD environments
+    subprocess.run(['aws', 'eks', 'update-kubeconfig', '--region', region, '--name', cluster_name])
+```
+
+This dual authentication approach ensures the same codebase works seamlessly across all deployment environments without manual configuration.
+
+### Resource Configuration
+
+The production overlay also configures resource limits and requests for both frontend and backend containers:
+
+#### Frontend Resources
+```yaml
+resources:
+  requests:
+    memory: "128Mi"
+    cpu: "100m"
+  limits:
+    memory: "256Mi"
+    cpu: "200m"
+```
+
+#### Backend Resources
+```yaml
+resources:
+  requests:
+    memory: "512Mi"
+    cpu: "200m"
+  limits:
+    memory: "1Gi"
+    cpu: "500m"
+```
+
+These resource configurations ensure:
+- **Frontend**: Lightweight resource allocation suitable for serving static content via nginx
+- **Backend**: Adequate resources for Python Flask application with kubectl operations and DynamoDB access
+- **Resource Requests**: Guaranteed minimum resources for scheduling
+- **Resource Limits**: Maximum resources to prevent resource exhaustion
+
+### Environment Configuration
 
 ### Production Environment Variables
 The production overlay configures the backend with the following environment variables:
@@ -121,16 +185,18 @@ env:
   value: "task-scheduler-logs-production"
 - name: PERMISSIONS_TABLE_NAME
   value: "cost-center-permissions-production"
-- name: PERMISSIONS_CACHE_ENABLED
-  value: "true"
-- name: PERMISSIONS_CACHE_TTL
-  value: "300"
-- name: LOG_LEVEL
-  value: "INFO"
-- name: LOG_FORMAT
-  value: "json"
-- name: LOG_FILE
-  value: "/app/logs/app.log"
+- name: BUSINESS_HOURS_TIMEZONE
+  value: "America/Bogota"
+- name: BUSINESS_START_HOUR
+  value: "8"
+- name: BUSINESS_END_HOUR
+  value: "18"
+- name: BUSINESS_HOLIDAYS
+  value: ""
+- name: BUSINESS_HOLIDAYS_COUNTRY
+  value: "CO"
+- name: BUSINESS_HOLIDAYS_SUBDIVISION
+  value: ""
 ```
 
 These variables are set in `manifests/overlays/production/task-scheduler-patch.yaml` and provide:
@@ -138,13 +204,14 @@ These variables are set in `manifests/overlays/production/task-scheduler-patch.y
 - **AWS_REGION**: AWS region for DynamoDB and other AWS service calls
 - **DYNAMODB_TABLE_NAME**: Production table for task execution logs (includes "-production" suffix)
 - **PERMISSIONS_TABLE_NAME**: Production table for cost center permissions (includes "-production" suffix)
-- **PERMISSIONS_CACHE_ENABLED**: Enable/disable permissions caching (default: "true")
-- **PERMISSIONS_CACHE_TTL**: Cache time-to-live in seconds (default: 300 = 5 minutes)
-- **LOG_LEVEL**: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL) - default: "INFO"
-- **LOG_FORMAT**: Log output format ("json" or "text") - default: "json"
-- **LOG_FILE**: Path to log file - default: "/app/logs/app.log"
+- **BUSINESS_HOURS_TIMEZONE**: Timezone for business hours calculation (set to "America/Bogota" for Colombia)
+- **BUSINESS_START_HOUR**: Business day start hour in 24-hour format (8 AM)
+- **BUSINESS_END_HOUR**: Business day end hour in 24-hour format (6 PM)
+- **BUSINESS_HOLIDAYS**: Comma-separated manual holiday dates (empty - using automatic detection)
+- **BUSINESS_HOLIDAYS_COUNTRY**: Country code for automatic holiday detection ("CO" for Colombia)
+- **BUSINESS_HOLIDAYS_SUBDIVISION**: State/province for regional holidays (empty for country-wide holidays)
 
-**Note**: The production environment uses table names with the "-production" suffix to separate production data from development/testing environments. This naming convention is consistent across all deployment scripts and infrastructure components.
+**Note**: The production environment uses table names with the "-production" suffix to separate production data from development/testing environments. This naming convention is consistent across all deployment scripts and infrastructure components. The production environment is configured for Colombia timezone (America/Bogota) with business hours from 8 AM to 6 PM and automatic Colombian holiday detection.
 
 ### Structured Logging
 

@@ -18,6 +18,11 @@ class TaskScheduler {
         this.updateDashboard();
         this.showDashboard();
         
+        // Check and create default system tasks if needed
+        setTimeout(() => {
+            this.checkAndCreateDefaultTasks();
+        }, 2000); // Wait 2 seconds for initial load
+        
         // Auto-refresh every 30 seconds
         setInterval(() => {
             this.loadNamespacesStatus();
@@ -982,6 +987,69 @@ class TaskScheduler {
             notificationManager.success('Tarea creada exitosamente');
         } else {
             notificationManager.error(`Error al crear la tarea: ${result.error}`);
+        }
+    }
+
+    async createDefaultSystemTasks() {
+        try {
+            notificationManager.info('Creando tareas del sistema por defecto...');
+            
+            const result = await apiClient.createDefaultSystemTasks();
+            
+            if (result.success) {
+                const data = result.data;
+                notificationManager.success(`✅ Creadas ${data.created_count} tareas del sistema`);
+                
+                // Reload tasks to show the new ones
+                await this.loadTasks();
+                
+                return true;
+            } else {
+                notificationManager.error(`Error al crear tareas del sistema: ${result.error}`);
+                return false;
+            }
+        } catch (error) {
+            notificationManager.error(`Error inesperado: ${error.message}`);
+            return false;
+        }
+    }
+
+    async checkAndCreateDefaultTasks() {
+        try {
+            // Check if we already have system tasks
+            const systemTasks = this.tasks.filter(task => 
+                task.system_task === true || 
+                task.cost_center === 'system' ||
+                task.requested_by === 'system-auto'
+            );
+            
+            if (systemTasks.length === 0) {
+                console.log('No system tasks found, creating default tasks...');
+                
+                // Show confirmation dialog
+                const confirmed = await this.showConfirmation(
+                    'Crear Tareas del Sistema',
+                    `<div class="alert alert-info mb-3">
+                        <i class="fas fa-info-circle"></i> 
+                        <strong>Tareas del Sistema:</strong> Se crearán tareas automáticas para encender y apagar namespaces críticos.
+                    </div>
+                    <p>¿Desea crear las tareas por defecto del sistema?</p>
+                    <small class="text-muted">
+                        • Encendido: 8:00 AM (Lunes a Viernes)<br>
+                        • Apagado: 6:00 PM (Lunes a Viernes)<br>
+                        • Namespaces: kube-system, monitoring, argocd, istio-system, karpenter, keda, task-scheduler
+                    </small>`,
+                    'primary'
+                );
+                
+                if (confirmed) {
+                    await this.createDefaultSystemTasks();
+                }
+            } else {
+                console.log(`Found ${systemTasks.length} existing system tasks`);
+            }
+        } catch (error) {
+            console.error('Error checking for default tasks:', error);
         }
     }
 
