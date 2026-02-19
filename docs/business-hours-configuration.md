@@ -119,6 +119,26 @@ A time is considered "non-business hours" if ANY of the following conditions are
 
 During non-business hours, the system enforces a limit of **5 active namespaces** per cost center to prevent resource waste.
 
+### Automatic Namespace Management
+
+The system includes automatic namespace management that integrates with business hours detection:
+
+**During Business Hours**:
+- All non-protected namespaces are automatically activated to ensure development resources are available
+- Protected namespaces remain active as always
+- Operations are logged as `auto_startup_business_hours` in the audit trail
+
+**Outside Business Hours**:
+- Non-protected namespaces without active scheduled tasks are automatically deactivated to save resources
+- Namespaces with active scheduled tasks remain active to support automated workflows
+- Protected namespaces remain active as always
+- Operations are logged as `auto_shutdown_business_hours` in the audit trail
+
+This automatic management runs:
+- Once at system startup (non-blocking background thread)
+- Every 15 minutes during normal operation (configurable via `DEFAULT_VALIDATION_INTERVAL`)
+- Can be disabled via `DEFAULT_VALIDATION_ENABLED=false` if manual control is preferred
+
 ## API Endpoints
 
 ### Get Business Hours Status

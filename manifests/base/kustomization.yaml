@@ -8,6 +8,7 @@ resources:
 - kubectl-runner-rbac.yaml
 - task-scheduler-deployment.yaml
 - task-scheduler-service.yaml
+- business-hours-config.yaml
 
 commonLabels:
   app.kubernetes.io/name: task-scheduler

@@ -246,16 +246,32 @@ The default namespace validation system performs the following actions:
 1. **Startup Validation**: Runs automatically in a background thread when the TaskScheduler initializes (non-blocking)
 2. **Periodic Validation**: Runs every 15 minutes (configurable) during normal operation
 3. **Protected Namespace Management**: Ensures protected namespaces are always active (scaled up)
-4. **Unscheduled Namespace Management**: Deactivates namespaces that don't have active scheduled tasks and aren't protected
+4. **Business Hours-Aware Management**: Manages non-protected namespaces based on business hours and scheduled tasks
 
 #### Validation Logic
 
-- **Protected Namespaces**: Always kept active regardless of scheduling
-- **Non-Protected Namespaces**: Deactivated if they have no active scheduled tasks
-- **Rollback Disabled**: Validation operations run without rollback to prevent conflicts with user operations
-- **Comprehensive Logging**: All validation actions are logged for audit purposes
+The validation logic is now business hours-aware and follows these rules:
 
-This feature helps ensure that critical namespaces remain protected and properly configured over time, while automatically managing resource usage for unscheduled namespaces.
+**Protected Namespaces**:
+- Always kept active regardless of business hours or scheduling
+- Automatically activated if found inactive
+- Logged as `auto_startup_protected` operations
+
+**Non-Protected Namespaces**:
+- **During Business Hours**: All non-protected namespaces are automatically activated
+  - Logged as `auto_startup_business_hours` operations
+- **Outside Business Hours**: Non-protected namespaces are managed based on scheduled tasks
+  - Namespaces with active scheduled tasks remain active
+  - Namespaces without scheduled tasks are deactivated
+  - Logged as `auto_shutdown_business_hours` operations
+
+**Additional Features**:
+- **Business Hours Detection**: Integrates with the business hours configuration system
+- **Audit Logging**: All automatic operations are logged to DynamoDB with operation type, cost center, and cluster information
+- **Rollback Disabled**: Validation operations run without rollback to prevent conflicts with user operations
+- **Comprehensive Logging**: All validation actions include business hours context in log messages
+
+This feature helps ensure that critical namespaces remain protected while optimizing resource usage based on business hours and scheduled activities. During business hours, all development namespaces are available for use, while outside business hours, only scheduled workloads and protected services remain active.
 
 ### Structured Logging
 

@@ -776,9 +776,12 @@ class TaskScheduler:
             return []
 
     def ensure_default_namespace_state(self):
-        """Ensure default state: protected namespaces ON, others OFF"""
+        """Ensure default state: protected namespaces ON, others based on business hours"""
         try:
             logger.info("Starting default namespace state validation")
+            
+            # Check if we're in business hours
+            is_business_hours = not self.is_non_business_hours()
             
             # Get all namespaces
             result = self.execute_kubectl_command('get namespaces -o json')
@@ -799,25 +802,64 @@ class TaskScheduler:
                         result = self.scale_namespace_resources(namespace_name, 1, enable_rollback=False)
                         if result.get('success'):
                             actions_taken.append(f"Activated protected namespace: {namespace_name}")
+                            # Log activity for protected namespace activation
+                            self.dynamodb_manager.log_namespace_activity(
+                                namespace_name=namespace_name,
+                                operation_type='auto_startup_protected',
+                                cost_center='system',
+                                requested_by='system',
+                                cluster_name=self.cluster_name
+                            )
                         else:
                             logger.error(f"Failed to activate protected namespace {namespace_name}: {result.get('error')}")
                 else:
-                    # Non-protected namespaces should be inactive by default
-                    # Only turn off if they don't have active scheduled tasks
-                    if self.is_namespace_active(namespace_name) and not self.has_active_scheduled_tasks(namespace_name):
-                        logger.info(f"Deactivating unscheduled namespace: {namespace_name}")
-                        result = self.scale_namespace_resources(namespace_name, 0, enable_rollback=False)
-                        if result.get('success'):
-                            actions_taken.append(f"Deactivated unscheduled namespace: {namespace_name}")
-                        else:
-                            logger.error(f"Failed to deactivate namespace {namespace_name}: {result.get('error')}")
+                    # Non-protected namespaces: active during business hours, inactive otherwise
+                    current_active = self.is_namespace_active(namespace_name)
+                    has_scheduled_tasks = self.has_active_scheduled_tasks(namespace_name)
+                    
+                    if is_business_hours:
+                        # During business hours: activate all non-protected namespaces
+                        if not current_active:
+                            logger.info(f"Activating namespace for business hours: {namespace_name}")
+                            result = self.scale_namespace_resources(namespace_name, 1, enable_rollback=False)
+                            if result.get('success'):
+                                actions_taken.append(f"Activated namespace for business hours: {namespace_name}")
+                                # Log activity for business hours activation
+                                self.dynamodb_manager.log_namespace_activity(
+                                    namespace_name=namespace_name,
+                                    operation_type='auto_startup_business_hours',
+                                    cost_center='system',
+                                    requested_by='system',
+                                    cluster_name=self.cluster_name
+                                )
+                            else:
+                                logger.error(f"Failed to activate namespace {namespace_name} for business hours: {result.get('error')}")
+                    else:
+                        # Outside business hours: deactivate unless they have active scheduled tasks
+                        if current_active and not has_scheduled_tasks:
+                            logger.info(f"Deactivating namespace outside business hours: {namespace_name}")
+                            result = self.scale_namespace_resources(namespace_name, 0, enable_rollback=False)
+                            if result.get('success'):
+                                actions_taken.append(f"Deactivated namespace outside business hours: {namespace_name}")
+                                # Log activity for business hours deactivation
+                                self.dynamodb_manager.log_namespace_activity(
+                                    namespace_name=namespace_name,
+                                    operation_type='auto_shutdown_business_hours',
+                                    cost_center='system',
+                                    requested_by='system',
+                                    cluster_name=self.cluster_name
+                                )
+                            else:
+                                logger.error(f"Failed to deactivate namespace {namespace_name} outside business hours: {result.get('error')}")
             
             if actions_taken:
-                logger.info(f"Default state validation completed. Actions taken: {len(actions_taken)}")
+                business_status = "business hours" if is_business_hours else "non-business hours"
+                logger.info(f"Default state validation completed during {business_status}. Actions taken: {len(actions_taken)}")
                 for action in actions_taken:
                     logger.info(f"  - {action}")
             else:
-                logger.debug("Default state validation completed. No actions needed.")
+                business_status = "business hours" if is_business_hours else "non-business hours"
+                logger.debug(f"Default state validation completed during {business_status}. No actions needed.")
             
             return True
             
@@ -3229,6 +3271,46 @@ def health_check():
             'max_retries': scheduler.max_retries
         }
     })
+
+@app.route('/api/business-hours', methods=['GET'])
+def get_business_hours_status():
+    """Get current business hours status and configuration"""
+    try:
+        business_info = scheduler.get_business_hours_info()
+        is_business_hours = not scheduler.is_non_business_hours()
+        
+        return jsonify({
+            'success': True,
+            'is_business_hours': is_business_hours,
+            'business_hours_info': business_info,
+            'protected_namespaces_count': len(scheduler.protected_namespaces),
+            'next_validation': 'Every 15 minutes'
+        })
+    except Exception as e:
+        logger.error(f"Error getting business hours status: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/business-hours/test-validation', methods=['POST'])
+def test_business_hours_validation():
+    """Test the business hours validation logic (manual trigger)"""
+    try:
+        result = scheduler.ensure_default_namespace_state()
+        
+        return jsonify({
+            'success': True,
+            'validation_completed': result,
+            'message': 'Business hours validation completed successfully' if result else 'Validation failed',
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        logger.error(f"Error testing business hours validation: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 @app.route('/api/tasks/running', methods=['GET'])
 def get_running_tasks():
