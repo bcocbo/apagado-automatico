@@ -24,6 +24,9 @@
                         <a class="nav-link" href="#" onclick="showDashboard()">Dashboard</a>
                     </li>
                     <li class="nav-item">
+                        <a class="nav-link" href="#" onclick="showWeeklyView()">Vista Semanal</a>
+                    </li>
+                    <li class="nav-item">
                         <a class="nav-link" href="#" onclick="showScheduler()">Programador</a>
                     </li>
                     <li class="nav-item">
@@ -67,6 +70,123 @@
                         <div class="card-body">
                             <h5>Fallidas</h5>
                             <h2 id="failed-tasks">0</h2>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Weekly View Section -->
+        <div id="weekly-view-section" class="section" style="display: none;">
+            <div class="row mb-3">
+                <div class="col-md-12">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <h5 class="mb-0">
+                                <i class="fas fa-calendar-week"></i> Vista Semanal de Programación
+                            </h5>
+                            <div class="btn-group" role="group">
+                                <button type="button" class="btn btn-outline-primary btn-sm" onclick="weeklyDashboard.navigateWeek('prev')">
+                                    <i class="fas fa-chevron-left"></i> Anterior
+                                </button>
+                                <button type="button" class="btn btn-outline-primary btn-sm" onclick="weeklyDashboard.navigateWeek('current')">
+                                    Semana Actual
+                                </button>
+                                <button type="button" class="btn btn-outline-primary btn-sm" onclick="weeklyDashboard.navigateWeek('next')">
+                                    Siguiente <i class="fas fa-chevron-right"></i>
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="weeklyDashboard.refreshData()">
+                                    <i class="fas fa-sync-alt"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="row mb-3">
+                                <div class="col-md-8">
+                                    <h6 class="text-muted mb-0">
+                                        <i class="fas fa-calendar"></i> 
+                                        <span id="current-week-range">Cargando...</span>
+                                    </h6>
+                                </div>
+                                <div class="col-md-4 text-end">
+                                    <small class="text-muted">
+                                        <span id="weekly-summary">0 tareas programadas</span>
+                                    </small>
+                                </div>
+                            </div>
+                            
+                            <!-- Loading indicator -->
+                            <div id="weekly-loading" class="text-center py-4">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Cargando...</span>
+                                </div>
+                                <p class="mt-2 text-muted">Cargando programación semanal...</p>
+                            </div>
+                            
+                            <!-- Weekly Grid -->
+                            <div id="weekly-grid-container" style="display: none;">
+                                <div class="table-responsive">
+                                    <table class="table table-bordered weekly-grid-table">
+                                        <thead class="table-dark">
+                                            <tr>
+                                                <th class="time-header">Hora</th>
+                                                <th class="day-header">Lunes</th>
+                                                <th class="day-header">Martes</th>
+                                                <th class="day-header">Miércoles</th>
+                                                <th class="day-header">Jueves</th>
+                                                <th class="day-header">Viernes</th>
+                                                <th class="day-header saturday">Sábado</th>
+                                                <th class="day-header sunday">Domingo</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="weekly-grid-body">
+                                            <!-- Grid will be populated by JavaScript -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                            
+                            <!-- Error message -->
+                            <div id="weekly-error" class="alert alert-danger" style="display: none;">
+                                <i class="fas fa-exclamation-triangle"></i>
+                                <span id="weekly-error-message">Error cargando datos</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Weekly Statistics -->
+            <div class="row">
+                <div class="col-md-3">
+                    <div class="card bg-info text-white">
+                        <div class="card-body">
+                            <h6>Namespaces Únicos</h6>
+                            <h3 id="weekly-unique-namespaces">0</h3>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card bg-success text-white">
+                        <div class="card-body">
+                            <h6>Centros de Costo</h6>
+                            <h3 id="weekly-cost-centers">0</h3>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card bg-warning text-white">
+                        <div class="card-body">
+                            <h6>Total Tareas</h6>
+                            <h3 id="weekly-total-tasks">0</h3>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card bg-primary text-white">
+                        <div class="card-body">
+                            <h6>Horas Programadas</h6>
+                            <h3 id="weekly-scheduled-hours">0</h3>
                         </div>
                     </div>
                 </div>
@@ -398,6 +518,7 @@
     <script src="api.js"></script>
     <script src="notifications.js"></script>
     <script src="loading.js"></script>
+    <script src="weekly-dashboard.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

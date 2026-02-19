@@ -753,3 +753,227 @@ body {
 .modal-body::-webkit-scrollbar-thumb:hover {
     background: #555;
 }
+/* Weekly View Styles */
+.weekly-grid-table {
+    font-size: 0.85rem;
+    margin-bottom: 0;
+}
+
+.weekly-grid-table th {
+    text-align: center;
+    vertical-align: middle;
+    font-weight: 600;
+    background-color: #343a40 !important;
+    color: white;
+    border: 1px solid #495057;
+    padding: 8px 4px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.weekly-grid-table .time-header {
+    width: 80px;
+    min-width: 80px;
+    background-color: #495057 !important;
+}
+
+.weekly-grid-table .day-header {
+    width: calc((100% - 80px) / 7);
+    min-width: 120px;
+}
+
+.weekly-grid-table .day-header.saturday,
+.weekly-grid-table .day-header.sunday {
+    background-color: #6c757d !important;
+}
+
+.weekly-grid-table td {
+    vertical-align: top;
+    padding: 4px;
+    border: 1px solid #dee2e6;
+    height: 50px;
+    position: relative;
+    background-color: #fff;
+}
+
+.weekly-grid-table .time-cell {
+    background-color: #f8f9fa;
+    text-align: center;
+    font-weight: 600;
+    color: #495057;
+    width: 80px;
+    min-width: 80px;
+}
+
+.weekly-grid-table .weekend-cell {
+    background-color: #f8f9fa;
+}
+
+.weekly-grid-table .holiday-cell {
+    background-color: #fff3cd;
+    border-left: 3px solid #ffc107;
+}
+
+.weekly-grid-table .non-business-hours {
+    background-color: #f1f3f4;
+}
+
+/* Task slot styles */
+.task-slot {
+    display: inline-block;
+    padding: 2px 6px;
+    margin: 1px;
+    border-radius: 3px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    line-height: 1.2;
+}
+
+.task-slot:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    z-index: 5;
+    position: relative;
+}
+
+.task-slot.activate {
+    background-color: #28a745;
+    color: white;
+    border: 1px solid #1e7e34;
+}
+
+.task-slot.deactivate {
+    background-color: #dc3545;
+    color: white;
+    border: 1px solid #bd2130;
+}
+
+.task-slot.command {
+    background-color: #007bff;
+    color: white;
+    border: 1px solid #0056b3;
+}
+
+/* Multiple tasks in same slot */
+.task-slot-container {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    height: 100%;
+    overflow: hidden;
+}
+
+.task-slot-container .task-slot {
+    margin: 0;
+    flex-shrink: 0;
+}
+
+/* Weekly statistics cards */
+.weekly-stats .card {
+    transition: transform 0.2s ease;
+}
+
+.weekly-stats .card:hover {
+    transform: translateY(-2px);
+}
+
+.weekly-stats .card-body h6 {
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+    opacity: 0.9;
+}
+
+.weekly-stats .card-body h3 {
+    font-size: 1.8rem;
+    font-weight: 700;
+    margin: 0;
+}
+
+/* Responsive weekly view */
+@media (max-width: 1200px) {
+    .weekly-grid-table {
+        font-size: 0.75rem;
+    }
+    
+    .weekly-grid-table .day-header {
+        min-width: 100px;
+    }
+    
+    .task-slot {
+        font-size: 0.7rem;
+        padding: 1px 4px;
+    }
+}
+
+@media (max-width: 992px) {
+    .weekly-grid-table .day-header {
+        min-width: 80px;
+    }
+    
+    .weekly-grid-table td {
+        height: 40px;
+    }
+    
+    .task-slot {
+        font-size: 0.65rem;
+        padding: 1px 3px;
+    }
+}
+
+@media (max-width: 768px) {
+    .weekly-grid-table {
+        font-size: 0.7rem;
+    }
+    
+    .weekly-grid-table .time-header {
+        width: 60px;
+        min-width: 60px;
+    }
+    
+    .weekly-grid-table .day-header {
+        min-width: 60px;
+        padding: 4px 2px;
+    }
+    
+    .weekly-grid-table td {
+        height: 35px;
+        padding: 2px;
+    }
+    
+    .task-slot {
+        font-size: 0.6rem;
+        padding: 1px 2px;
+        margin: 0.5px;
+    }
+    
+    .weekly-stats .card-body h3 {
+        font-size: 1.5rem;
+    }
+    
+    .btn-group .btn {
+        padding: 0.25rem 0.5rem;
+        font-size: 0.8rem;
+    }
+}
+
+/* Time slot hover effects */
+.weekly-grid-table td:hover {
+    background-color: #e3f2fd;
+    cursor: pointer;
+}
+
+.weekly-grid-table td.weekend-cell:hover {
+    background-color: #f0f0f0;
+}
+
+.weekly-grid-table td.holiday-cell:hover {
+    background-color: #fff8e1;
+}

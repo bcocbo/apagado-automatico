@@ -1475,6 +1475,16 @@ function showScheduler() {
     taskScheduler.loadNamespacesStatus();
 }
 
+function showWeeklyView() {
+    hideAllSections();
+    document.getElementById('weekly-view-section').style.display = 'block';
+    
+    // Initialize weekly dashboard if not already done
+    if (weeklyDashboard) {
+        weeklyDashboard.init();
+    }
+}
+
 function showLogs() {
     hideAllSections();
     document.getElementById('logs-section').style.display = 'block';
