@@ -17,28 +17,88 @@ La protección de namespaces se implementa mediante una combinación de ClusterR
 
 **Cómo funciona**: Los RoleBindings específicos en namespaces protegidos tienen precedencia sobre el ClusterRoleBinding, por lo que aunque el service account `kubectl-runner` tiene permisos de escritura a nivel de cluster, los namespaces protegidos solo permiten lectura.
 
-### 2. Protección Secundaria: Validación en Backend (Recomendada)
+### 2. Protección Secundaria: Validación en Backend (Implementada)
 
-Aunque el RBAC proporciona protección a nivel de Kubernetes, se recomienda implementar validación adicional en el backend para:
+El backend ahora implementa validación de namespaces protegidos mediante un archivo de configuración JSON. Esta protección proporciona:
 
-- Proporcionar mensajes de error más claros a los usuarios
-- Permitir configuración dinámica de namespaces protegidos
-- Facilitar auditoría y logging de intentos de modificación
-- Agregar lógica de negocio adicional (ej: horarios, permisos por usuario)
+- Mensajes de error más claros a los usuarios
+- Configuración centralizada de namespaces protegidos
+- Facilita auditoría y logging de intentos de modificación
+- Permite lógica de negocio adicional (ej: horarios, permisos por usuario)
+
+#### Configuración de Namespaces Protegidos
+
+Los namespaces protegidos se configuran mediante el archivo `kubectl-runner/src/config/protected-namespaces.json`:
+
+```json
+{
+  "protected_namespaces": [
+    "kube-system",
+    "kube-public", 
+    "kube-node-lease",
+    "default",
+    "karpenter",
+    "kyverno",
+    "argocd",
+    "istio-system",
+    "monitoring",
+    "task-scheduler",
+    "cert-manager",
+    "ingress-nginx",
+    "amazon-cloudwatch",
+    "calico-system",
+    "tigera-operator"
+  ],
+  "description": "Namespaces que nunca se apagan y no aparecen en la vista semanal de programación",
+  "last_updated": "2024-02-19T00:00:00Z"
+}
+```
+
+#### Carga Automática de Configuración
+
+El backend carga automáticamente la configuración de namespaces protegidos al inicializar:
+
+```python
+def load_protected_namespaces(self):
+    """Load protected namespaces from configuration file"""
+    config_path = '/app/config/protected-namespaces.json'  # Production path
+    # Falls back to './config/protected-namespaces.json' for local development
+    
+    try:
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+            return set(config.get('protected_namespaces', []))
+    except FileNotFoundError:
+        # Fallback to hardcoded list if config file not found
+        return {
+            'kube-system', 'kube-public', 'kube-node-lease', 'default',
+            'karpenter', 'kyverno', 'argocd', 'istio-system', 
+            'monitoring', 'task-scheduler'
+        }
+```
 
 ### 2. Namespaces Protegidos
 
 Los siguientes namespaces están protegidos mediante RoleBindings de solo lectura y validación en el backend, y NO pueden ser desescalados:
 
+**Configuración actual** (según `kubectl-runner/src/config/protected-namespaces.json`):
+- `kube-system` - Componentes core de Kubernetes
+- `kube-public` - Recursos públicos de Kubernetes
+- `kube-node-lease` - Sistema de lease de nodos
+- `default` - Namespace por defecto de Kubernetes
 - `karpenter` - Autoscaling de nodos (crítico para el cluster)
 - `kyverno` - Policy engine (crítico para enforcement de políticas)
 - `argocd` - Sistema de despliegue continuo (crítico para CI/CD)
-- `kube-system` - Componentes core de Kubernetes
 - `istio-system` - Service mesh (crítico para networking)
 - `monitoring` - Sistema de observabilidad (crítico para monitoreo)
 - `task-scheduler` - El propio namespace del scheduler
+- `cert-manager` - Gestión de certificados TLS
+- `ingress-nginx` - Controlador de ingress
+- `amazon-cloudwatch` - Integración con CloudWatch
+- `calico-system` - Sistema de networking Calico
+- `tigera-operator` - Operador de Tigera/Calico
 
-**Nota**: La lista actualizada refleja la implementación actual en el método `is_protected_namespace()` del backend.
+**Nota**: La lista se mantiene actualizada en el archivo de configuración JSON y se carga automáticamente al inicializar el backend.
 
 Cada uno de estos namespaces tiene un RoleBinding que vincula el service account `kubectl-runner` al ClusterRole `kubectl-runner-readonly`, lo que sobrescribe los permisos de escritura del ClusterRoleBinding global.
 
@@ -117,24 +177,31 @@ subjects:
 
 ### 4. Implementación en el Backend (Implementada)
 
-El backend ahora incluye el método `is_protected_namespace()` que implementa la validación de namespaces protegidos:
+El backend ahora incluye carga automática de namespaces protegidos desde archivo de configuración:
 
 ```python
+def load_protected_namespaces(self):
+    """Load protected namespaces from configuration file"""
+    config_path = '/app/config/protected-namespaces.json'
+    
+    try:
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+            return set(config.get('protected_namespaces', []))
+    except FileNotFoundError:
+        # Fallback to hardcoded list if config file not found
+        return {
+            'kube-system', 'kube-public', 'kube-node-lease', 'default',
+            'karpenter', 'kyverno', 'argocd', 'istio-system', 
+            'monitoring', 'task-scheduler'
+        }
+
 def is_protected_namespace(self, namespace_name):
     """Check if a namespace is protected and cannot be activated/deactivated"""
-    protected_namespaces = [
-        'karpenter',     # Critical for cluster autoscaling
-        'kyverno',       # Critical for policy enforcement
-        'argocd',        # Critical for CI/CD operations
-        'kube-system',   # Core Kubernetes system
-        'istio-system',  # Service mesh - critical for networking
-        'monitoring',    # Critical for observability
-        'task-scheduler' # This application itself
-    ]
-    return namespace_name in protected_namespaces
+    return namespace_name in self.protected_namespaces
 ```
 
-Este método debe ser utilizado en todos los endpoints que modifican el estado de los namespaces para prevenir operaciones no autorizadas.
+La configuración se carga una vez al inicializar el backend y se almacena en `self.protected_namespaces` para acceso rápido.
 
 ### 5. Validación en Endpoints
 
@@ -206,11 +273,57 @@ function renderNamespaceRow(namespace) {
 }
 ```
 
-## Configuración Dinámica (Opcional)
+## Configuración Dinámica
 
-Para mayor flexibilidad, los namespaces protegidos pueden configurarse mediante:
+### Archivo de Configuración JSON (Implementado)
 
-### ConfigMap
+Los namespaces protegidos se configuran mediante el archivo `kubectl-runner/src/config/protected-namespaces.json`:
+
+```json
+{
+  "protected_namespaces": [
+    "kube-system",
+    "kube-public", 
+    "kube-node-lease",
+    "default",
+    "karpenter",
+    "kyverno",
+    "argocd",
+    "istio-system",
+    "monitoring",
+    "task-scheduler",
+    "cert-manager",
+    "ingress-nginx",
+    "amazon-cloudwatch",
+    "calico-system",
+    "tigera-operator"
+  ],
+  "description": "Namespaces que nunca se apagan y no aparecen en la vista semanal de programación",
+  "last_updated": "2024-02-19T00:00:00Z"
+}
+```
+
+**Ventajas del archivo de configuración:**
+- Configuración centralizada y versionada
+- Fácil actualización sin cambios de código
+- Documentación integrada con descripción y fecha de actualización
+- Fallback automático a lista hardcodeada si el archivo no existe
+
+### Variables de Entorno para Validación por Defecto
+
+El backend también soporta configuración de validación de namespaces por defecto:
+
+```yaml
+env:
+- name: DEFAULT_VALIDATION_ENABLED
+  value: "true"  # Habilitar validación de namespaces por defecto
+- name: DEFAULT_VALIDATION_INTERVAL
+  value: "900"   # Intervalo de validación en segundos (15 minutos)
+```
+
+### ConfigMap (Alternativa)
+
+Para mayor flexibilidad, los namespaces protegidos también pueden configurarse mediante ConfigMap:
 
 ```yaml
 apiVersion: v1
@@ -219,17 +332,25 @@ metadata:
   name: namespace-scheduler-config
   namespace: task-scheduler
 data:
-  protected-namespaces: |
-    karpenter
-    kyverno
-    argocd
-    kube-system
-    istio-system
-    monitoring
-    task-scheduler
+  protected-namespaces.json: |
+    {
+      "protected_namespaces": [
+        "karpenter",
+        "kyverno",
+        "argocd",
+        "kube-system",
+        "istio-system",
+        "monitoring",
+        "task-scheduler"
+      ],
+      "description": "Namespaces protegidos configurados via ConfigMap",
+      "last_updated": "2024-02-19T00:00:00Z"
+    }
 ```
 
-### Variable de Entorno
+### Variable de Entorno (Legado)
+
+Para compatibilidad, también se soporta configuración via variable de entorno:
 
 ```yaml
 env:

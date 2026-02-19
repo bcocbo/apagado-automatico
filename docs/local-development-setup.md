@@ -95,6 +95,8 @@ The local development script configures the following environment variables:
 | `AWS_REGION` | `us-east-1` | AWS region for DynamoDB access |
 | `DYNAMODB_TABLE_NAME` | `task-scheduler-logs-local` | Local DynamoDB table name |
 | `PERMISSIONS_TABLE_NAME` | `cost-center-permissions-local` | Local permissions table name |
+| `DEFAULT_VALIDATION_ENABLED` | `true` | Enable default namespace validation |
+| `DEFAULT_VALIDATION_INTERVAL` | `900` | Default validation interval (15 minutes) |
 
 ### Production Connection (`run-production.py`)
 
@@ -108,6 +110,8 @@ The production runner script configures the following environment variables:
 | `AWS_REGION` | `us-east-1` | AWS region for DynamoDB access |
 | `DYNAMODB_TABLE_NAME` | `task-scheduler-logs-production` | Production DynamoDB table name |
 | `PERMISSIONS_TABLE_NAME` | `cost-center-permissions-production` | Production permissions table name |
+| `DEFAULT_VALIDATION_ENABLED` | `true` | Enable default namespace validation |
+| `DEFAULT_VALIDATION_INTERVAL` | `900` | Default validation interval (15 minutes) |
 
 ## Prerequisites
 

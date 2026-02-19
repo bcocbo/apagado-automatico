@@ -312,11 +312,24 @@ class WeeklyDashboard {
                             </div>
                             
                             <div class="mb-3">
-                                <label for="taskOperation" class="form-label">Operación <span class="text-danger">*</span></label>
+                                <label for="taskOperation" class="form-label">Tipo de Programación <span class="text-danger">*</span></label>
                                 <select class="form-control" id="taskOperation" required>
-                                    <option value="activate">Activar Namespace</option>
-                                    <option value="deactivate">Desactivar Namespace</option>
+                                    <option value="duration">Activar por duración específica</option>
                                 </select>
+                                <small class="form-text text-muted">Se creará automáticamente la tarea de activación y desactivación</small>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="taskDuration" class="form-label">Duración (horas) <span class="text-danger">*</span></label>
+                                <select class="form-control" id="taskDuration" required>
+                                    <option value="1">1 hora</option>
+                                    <option value="2">2 horas</option>
+                                    <option value="4">4 horas</option>
+                                    <option value="8">8 horas</option>
+                                    <option value="12">12 horas</option>
+                                    <option value="24">24 horas</option>
+                                </select>
+                                <small class="form-text text-muted">¿Por cuántas horas debe estar activo el namespace?</small>
                             </div>
                             
                             <div class="mb-3">
@@ -374,31 +387,65 @@ class WeeklyDashboard {
      * Load schedulable namespaces for the modal
      */
     async loadSchedulableNamespaces() {
+        const select = document.getElementById('taskNamespace');
+        
+        if (!select) {
+            console.error('taskNamespace select element not found');
+            return;
+        }
+        
         try {
+            console.log('Loading schedulable namespaces...');
+            
+            // Show loading state
+            select.innerHTML = '<option value="">Cargando namespaces...</option>';
+            select.disabled = true;
+            
             const response = await fetch('/api/namespaces/schedulable');
+            
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
             
             const data = await response.json();
-            const select = document.getElementById('taskNamespace');
+            console.log('Schedulable namespaces response:', data);
             
-            if (select) {
-                select.innerHTML = '<option value="">Seleccionar namespace...</option>';
-                
+            // Check if response indicates success
+            if (data.success === false) {
+                throw new Error(data.error || 'Error desconocido del servidor');
+            }
+            
+            // Re-enable select
+            select.disabled = false;
+            select.innerHTML = '<option value="">Seleccionar namespace...</option>';
+            
+            if (data.schedulable_namespaces && data.schedulable_namespaces.length > 0) {
                 data.schedulable_namespaces.forEach(ns => {
                     const option = document.createElement('option');
                     option.value = ns.name;
                     option.textContent = `${ns.name} ${ns.is_active ? '(activo)' : '(inactivo)'}`;
                     select.appendChild(option);
                 });
+                console.log(`Added ${data.schedulable_namespaces.length} namespaces to select`);
+            } else {
+                select.innerHTML = '<option value="">No hay namespaces programables</option>';
+                console.warn('No schedulable namespaces found');
             }
             
         } catch (error) {
             console.error('Error loading schedulable namespaces:', error);
-            const select = document.getElementById('taskNamespace');
-            if (select) {
-                select.innerHTML = '<option value="">Error cargando namespaces</option>';
+            
+            // Re-enable select and show error
+            select.disabled = false;
+            select.innerHTML = '<option value="">Error cargando namespaces</option>';
+            
+            // Show user-friendly error notification
+            if (typeof showNotification === 'function') {
+                showNotification(`Error cargando namespaces: ${error.message}`, 'error');
+            } else {
+                // Fallback to alert if notification system not available
+                console.warn('showNotification function not available, using alert');
+                alert(`Error cargando namespaces: ${error.message}`);
             }
         }
     }
@@ -409,16 +456,16 @@ class WeeklyDashboard {
     async createTaskFromModal(dayIndex, hour) {
         try {
             const form = document.getElementById('weeklyTaskForm');
-            const formData = new FormData(form);
             
             const namespace = document.getElementById('taskNamespace').value;
             const operation = document.getElementById('taskOperation').value;
             const costCenter = document.getElementById('taskCostCenter').value;
             const minute = parseInt(document.getElementById('taskMinute').value);
+            const duration = parseInt(document.getElementById('taskDuration').value);
             const description = document.getElementById('taskDescription').value;
             
             // Validate required fields
-            if (!namespace || !operation || !costCenter) {
+            if (!namespace || !operation || !costCenter || !duration) {
                 alert('Por favor completa todos los campos requeridos');
                 return;
             }
@@ -429,43 +476,89 @@ class WeeklyDashboard {
             createButton.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Creando...';
             createButton.disabled = true;
             
-            // Create task via API
-            const response = await fetch('/api/weekly-schedule/create-task', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    namespace: namespace,
-                    day_of_week: dayIndex,
-                    hour: hour,
-                    minute: minute,
-                    operation_type: operation,
-                    cost_center: costCenter,
-                    description: description,
-                    user_id: 'weekly-view-user',
-                    requested_by: 'weekly-view-user'
-                })
-            });
-            
-            const result = await response.json();
-            
-            if (response.ok && result.success) {
+            try {
+                // Create activation task
+                const activationResponse = await fetch('/api/weekly-schedule/create-task', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        namespace: namespace,
+                        day_of_week: dayIndex,
+                        hour: hour,
+                        minute: minute,
+                        operation_type: 'activate',
+                        cost_center: costCenter,
+                        description: description || `Activar ${namespace} por ${duration} horas`,
+                        user_id: 'weekly-view-user',
+                        requested_by: 'weekly-view-user'
+                    })
+                });
+                
+                const activationResult = await activationResponse.json();
+                
+                if (!activationResponse.ok || !activationResult.success) {
+                    throw new Error(activationResult.error || 'Error creando tarea de activación');
+                }
+                
+                // Calculate deactivation time
+                const deactivationHour = (hour + duration) % 24;
+                const dayOffset = Math.floor((hour + duration) / 24);
+                const deactivationDay = (dayIndex + dayOffset) % 7; // Wrap to next week if needed
+                
+                // Create deactivation task
+                const deactivationResponse = await fetch('/api/weekly-schedule/create-task', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        namespace: namespace,
+                        day_of_week: deactivationDay,
+                        hour: deactivationHour,
+                        minute: minute,
+                        operation_type: 'deactivate',
+                        cost_center: costCenter,
+                        description: description || `Desactivar ${namespace} después de ${duration} horas`,
+                        user_id: 'weekly-view-user',
+                        requested_by: 'weekly-view-user'
+                    })
+                });
+                
+                const deactivationResult = await deactivationResponse.json();
+                
+                if (!deactivationResponse.ok || !deactivationResult.success) {
+                    console.warn('Error creating deactivation task:', deactivationResult.error);
+                    // Continue anyway - activation was successful
+                    if (typeof showNotification === 'function') {
+                        showNotification(`Tarea de activación creada, pero falló la desactivación: ${deactivationResult.error}`, 'warning');
+                    }
+                } else {
+                    // Both tasks created successfully
+                    if (typeof showNotification === 'function') {
+                        showNotification(`Tareas creadas: activación y desactivación después de ${duration} horas`, 'success');
+                    } else {
+                        alert(`Tareas creadas exitosamente: activación y desactivación después de ${duration} horas`);
+                    }
+                }
+                
                 // Success - close modal and refresh data
                 const modal = bootstrap.Modal.getInstance(document.getElementById('weeklyTaskModal'));
                 modal.hide();
                 
-                // Show success notification
-                if (typeof showNotification === 'function') {
-                    showNotification('Tarea creada exitosamente', 'success');
-                }
-                
                 // Refresh weekly data
                 await this.refreshData();
                 
-            } else {
-                // Error
-                alert(`Error creando tarea: ${result.error || 'Error desconocido'}`);
+            } catch (error) {
+                console.error('Error creating tasks:', error);
+                
+                // Show error message
+                if (typeof showNotification === 'function') {
+                    showNotification(`Error creando tareas: ${error.message}`, 'error');
+                } else {
+                    alert(`Error creando tareas: ${error.message}`);
+                }
                 
                 // Restore button state
                 createButton.innerHTML = originalText;
@@ -473,8 +566,8 @@ class WeeklyDashboard {
             }
             
         } catch (error) {
-            console.error('Error creating task from modal:', error);
-            alert(`Error creando tarea: ${error.message}`);
+            console.error('Error in createTaskFromModal:', error);
+            alert(`Error inesperado: ${error.message}`);
             
             // Restore button state
             const createButton = document.querySelector('#weeklyTaskModal .btn-primary');

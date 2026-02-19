@@ -53,6 +53,9 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 COPY src/ ./
 COPY scripts/ ./scripts/
 
+# Copy configuration files
+COPY src/config/ ./config/
+
 # Make scripts executable
 RUN chmod +x scripts/*.sh
 

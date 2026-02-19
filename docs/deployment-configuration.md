@@ -199,6 +199,10 @@ env:
   value: "CO"
 - name: BUSINESS_HOLIDAYS_SUBDIVISION
   value: ""
+- name: DEFAULT_VALIDATION_ENABLED
+  value: "true"
+- name: DEFAULT_VALIDATION_INTERVAL
+  value: "900"
 ```
 
 These variables are set in `manifests/overlays/production/task-scheduler-patch.yaml` and provide:
@@ -213,8 +217,45 @@ These variables are set in `manifests/overlays/production/task-scheduler-patch.y
 - **BUSINESS_HOLIDAYS**: Comma-separated manual holiday dates (empty - using automatic detection)
 - **BUSINESS_HOLIDAYS_COUNTRY**: Country code for automatic holiday detection ("CO" for Colombia)
 - **BUSINESS_HOLIDAYS_SUBDIVISION**: State/province for regional holidays (empty for country-wide holidays)
+- **DEFAULT_VALIDATION_ENABLED**: Enable/disable default namespace validation (default: "true")
+- **DEFAULT_VALIDATION_INTERVAL**: Interval in seconds for default namespace validation checks (default: 900 = 15 minutes)
 
 **Note**: The production environment uses table names with the "-production" suffix to separate production data from development/testing environments. This naming convention is consistent across all deployment scripts and infrastructure components. The production environment is configured for Colombia timezone (America/Bogota) with business hours from 8 AM to 6 PM and automatic Colombian holiday detection.
+
+### Protected Namespaces Configuration
+
+The backend automatically loads protected namespaces configuration from `/app/config/protected-namespaces.json`. This file defines which namespaces cannot be scaled down and are excluded from the weekly scheduling view. The configuration includes:
+
+- **protected_namespaces**: Array of namespace names that are protected
+- **description**: Human-readable description of the configuration
+- **last_updated**: Timestamp of last configuration update
+
+If the configuration file is not found, the backend falls back to a hardcoded list of essential system namespaces.
+
+### Default Namespace Validation
+
+The backend includes configurable validation for default namespace management:
+
+- **DEFAULT_VALIDATION_ENABLED**: Enable/disable automatic validation of default namespaces (default: "true")
+- **DEFAULT_VALIDATION_INTERVAL**: Interval in seconds between validation checks (default: 900 seconds = 15 minutes)
+
+#### Validation Behavior
+
+The default namespace validation system performs the following actions:
+
+1. **Startup Validation**: Runs automatically in a background thread when the TaskScheduler initializes (non-blocking)
+2. **Periodic Validation**: Runs every 15 minutes (configurable) during normal operation
+3. **Protected Namespace Management**: Ensures protected namespaces are always active (scaled up)
+4. **Unscheduled Namespace Management**: Deactivates namespaces that don't have active scheduled tasks and aren't protected
+
+#### Validation Logic
+
+- **Protected Namespaces**: Always kept active regardless of scheduling
+- **Non-Protected Namespaces**: Deactivated if they have no active scheduled tasks
+- **Rollback Disabled**: Validation operations run without rollback to prevent conflicts with user operations
+- **Comprehensive Logging**: All validation actions are logged for audit purposes
+
+This feature helps ensure that critical namespaces remain protected and properly configured over time, while automatically managing resource usage for unscheduled namespaces.
 
 ### Structured Logging
 

@@ -711,6 +711,10 @@ class TaskScheduler:
         if self.auto_save_enabled:
             self.start_auto_save(self.auto_save_interval)
         
+        # Run initial default state validation in background (non-blocking)
+        if self.default_validation_enabled:
+            threading.Thread(target=self.ensure_default_namespace_state, daemon=True).start()
+        
         logger.info(f"TaskScheduler initialized with {self.max_workers} workers, "
                    f"{self.task_timeout}s timeout, {self.max_retries} max retries, "
                    f"auto-save: {self.auto_save_enabled}")
@@ -3519,22 +3523,25 @@ def get_namespaces():
 def get_schedulable_namespaces():
     """Get namespaces that can be scheduled (non-protected)"""
     try:
+        # Get basic list of schedulable namespaces (fast)
         schedulable_namespaces = scheduler.get_schedulable_namespaces()
         
-        # Add additional metadata for each namespace
+        # For the modal, we only need basic info - don't fetch detailed resource info
+        # This makes the endpoint much faster
         namespace_details = []
         for namespace in schedulable_namespaces:
-            details = scheduler.get_namespace_details(namespace)
+            # Only get basic active status, skip detailed resource queries
+            is_active = scheduler.is_namespace_active(namespace)
             namespace_details.append({
                 'name': namespace,
-                'is_active': details.get('is_active', False),
-                'active_pods': details.get('active_pods', 0),
-                'deployments': len(details.get('deployments', [])),
-                'statefulsets': len(details.get('statefulsets', [])),
+                'is_active': is_active,
                 'is_protected': False  # These are all non-protected by definition
             })
         
+        logger.info(f"Returning {len(namespace_details)} schedulable namespaces")
+        
         return jsonify({
+            'success': True,
             'schedulable_namespaces': namespace_details,
             'total_count': len(namespace_details),
             'protected_count': len(scheduler.protected_namespaces)
@@ -3542,7 +3549,10 @@ def get_schedulable_namespaces():
         
     except Exception as e:
         logger.error(f"Error getting schedulable namespaces: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 @app.route('/api/namespaces/<namespace>/activate', methods=['POST'])
 def activate_namespace(namespace):
