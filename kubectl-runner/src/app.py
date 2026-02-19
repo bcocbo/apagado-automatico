@@ -3352,7 +3352,7 @@ def create_batch_tasks():
                     continue
                 
                 # Create task using existing scheduler logic
-                task_id = task_data.get('id') or scheduler.generate_id()
+                task_id = task_data.get('id') or str(uuid.uuid4())
                 
                 # Prepare task for scheduler
                 task = {
@@ -3377,18 +3377,7 @@ def create_batch_tasks():
                     task['command'] = task_data.get('command', '')
                 
                 # Add task to scheduler
-                scheduler.add_task(
-                    task_id=task_id,
-                    title=task['title'],
-                    schedule=task['schedule'],
-                    operation_type=task['operation_type'],
-                    namespace=task['namespace'],
-                    cost_center=task['cost_center'],
-                    command=task.get('command'),
-                    description=task.get('description'),
-                    user_id=task['user_id'],
-                    requested_by=task['requested_by']
-                )
+                scheduler.add_task(task)
                 
                 created_tasks.append(task)
                 logger.info(f"Created batch task {i+1}/{len(tasks)}: {task['title']}")
@@ -3465,20 +3454,23 @@ def create_batch_tasks_internal(data):
     
     for i, task_data in enumerate(tasks):
         try:
-            task_id = task_data.get('id') or scheduler.generate_id()
+            task_id = task_data.get('id') or str(uuid.uuid4())
             
-            scheduler.add_task(
-                task_id=task_id,
-                title=task_data['title'],
-                schedule=task_data['schedule'],
-                operation_type=task_data['operation_type'],
-                namespace=task_data['namespace'],
-                cost_center=task_data['cost_center'],
-                command=task_data.get('command'),
-                description=task_data.get('description'),
-                user_id=task_data.get('user_id', 'system'),
-                requested_by=task_data.get('requested_by', 'system-auto')
-            )
+            # Prepare complete task data
+            complete_task_data = {
+                'id': task_id,
+                'title': task_data['title'],
+                'schedule': task_data['schedule'],
+                'operation_type': task_data['operation_type'],
+                'namespace': task_data['namespace'],
+                'cost_center': task_data['cost_center'],
+                'command': task_data.get('command'),
+                'description': task_data.get('description'),
+                'user_id': task_data.get('user_id', 'system'),
+                'requested_by': task_data.get('requested_by', 'system-auto')
+            }
+            
+            scheduler.add_task(complete_task_data)
             
             created_tasks.append(task_data)
             
