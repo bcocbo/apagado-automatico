@@ -111,6 +111,98 @@ Sistema de programación automática de namespaces en Kubernetes que permite act
 8.6 Debe mantener trazabilidad completa de la cadena de aprobación
 8.7 Debe permitir exportar logs de auditoría para análisis externos
 
+### 9. Vista Semanal del Dashboard
+**Como** administrador del cluster
+**Quiero** ver una vista semanal completa de 7 días x 24 horas mostrando qué namespaces están programados para estar activos
+**Para** entender rápidamente la programación de todos los namespaces durante toda la semana y optimizar el uso de recursos
+
+**Criterios de Aceptación:**
+9.1 Debe mostrar una grilla de 7 días (Lunes a Domingo) como columnas
+9.2 Debe mostrar 24 horas (00:00 a 23:00) como filas para cada día
+9.3 Debe ser la vista principal del dashboard al cargar la aplicación
+9.4 Debe reemplazar las estadísticas básicas actuales como interfaz principal
+9.5 Debe mostrar la semana actual por defecto
+9.6 Debe mostrar los nombres de los namespaces programados en cada slot de tiempo
+9.7 Debe mostrar múltiples namespaces cuando estén programados para el mismo horario
+9.8 Debe usar indicadores visuales distintos (colores, iconos) para diferenciar namespaces
+9.9 Debe conectar visualmente los slots de tiempo cuando un namespace tenga programación continua
+
+### 10. Navegación Temporal en Vista Semanal
+**Como** administrador del cluster
+**Quiero** navegar entre diferentes semanas en la vista semanal
+**Para** revisar programaciones pasadas y planificar programaciones futuras
+
+**Criterios de Aceptación:**
+10.1 Debe proporcionar controles para navegar a la semana anterior
+10.2 Debe proporcionar controles para navegar a la semana siguiente
+10.3 Debe actualizar los datos de programación al cambiar de semana
+10.4 Debe mostrar prominentemente el rango de la semana actual (fecha inicio - fecha fin)
+10.5 Debe proporcionar un botón "Semana Actual" para regresar rápidamente
+
+### 11. Integración de Datos para Vista Semanal
+**Como** desarrollador del sistema
+**Quiero** que la vista semanal utilice los datos existentes del sistema
+**Para** mantener consistencia y evitar duplicación de información
+
+**Criterios de Aceptación:**
+11.1 Debe obtener datos de programación desde la base de datos DynamoDB existente
+11.2 Debe usar los endpoints de la API Flask existente o crear nuevos siguiendo los mismos patrones
+11.3 Debe reflejar cambios cuando los datos de programación se actualicen
+11.4 Debe mantener compatibilidad con el sistema de autenticación y permisos existente
+11.5 Debe manejar estados de carga y mostrar indicadores apropiados
+
+### 12. Responsividad y Usabilidad de Vista Semanal
+**Como** usuario del sistema
+**Quiero** que la vista semanal sea fácil de usar y se adapte a diferentes tamaños de pantalla
+**Para** acceder a la información desde cualquier dispositivo
+
+**Criterios de Aceptación:**
+12.1 Debe ser responsiva y adaptarse a diferentes tamaños de pantalla (escritorio, tablet, móvil)
+12.2 Debe proporcionar scroll horizontal o layouts alternativos en pantallas pequeñas
+12.3 Debe mantener legibilidad de nombres de namespaces e información de tiempo en todos los tamaños
+12.4 Debe mostrar detalles adicionales al hacer hover o click en un slot de tiempo
+12.5 Debe proporcionar feedback visual claro para interacciones del usuario
+
+### 13. Rendimiento de Vista Semanal
+**Como** usuario del sistema
+**Quiero** que la vista semanal cargue rápidamente y maneje eficientemente grandes cantidades de datos
+**Para** tener una experiencia fluida
+
+**Criterios de Aceptación:**
+13.1 Debe cargar y mostrar información semanal en menos de 3 segundos bajo condiciones normales de red
+13.2 Debe implementar caché eficiente para evitar llamadas innecesarias a la API al navegar entre semanas
+13.3 Debe implementar paginación o carga lazy cuando los datos semanales sean grandes
+13.4 Debe proporcionar manejo de errores y mecanismos de reintento para solicitudes fallidas
+13.5 Debe mostrar estados de carga apropiados sin bloquear la interacción del usuario
+
+### 14. Marcado de Festivos Colombianos
+**Como** administrador del cluster
+**Quiero** que el sistema identifique y marque visualmente los días festivos en Colombia en la vista semanal
+**Para** permitir activación de namespaces en festivos pero con diferenciación visual clara
+
+**Criterios de Aceptación:**
+14.1 Debe identificar automáticamente los días festivos oficiales de Colombia
+14.2 Debe marcar visualmente los días festivos con un color o indicador diferente en la vista semanal
+14.3 Debe permitir la activación de namespaces durante días festivos sin restricciones adicionales
+14.4 Debe mostrar claramente que un día es festivo mediante tooltips o etiquetas
+14.5 Debe incluir tanto festivos fijos como festivos móviles del calendario colombiano
+14.6 Debe actualizar automáticamente la lista de festivos para el año en curso
+
+### 15. Reporte Semanal de Horas por Namespace y Centro de Costo
+**Como** administrador financiero
+**Quiero** generar reportes semanales que muestren las horas de uso de cada namespace y su centro de costo asociado
+**Para** realizar seguimiento de costos y optimizar el uso de recursos
+
+**Criterios de Aceptación:**
+15.1 Debe generar un reporte semanal mostrando las horas totales de actividad por namespace
+15.2 Debe asociar cada namespace con su centro de costo correspondiente en el reporte
+15.3 Debe calcular automáticamente las horas de uso basado en los horarios programados y ejecuciones reales
+15.4 Debe permitir exportar el reporte en formato CSV o Excel
+15.5 Debe mostrar el reporte directamente en la interfaz web con tablas organizadas
+15.6 Debe incluir totales por centro de costo y gran total de horas
+15.7 Debe permitir generar reportes para semanas específicas, no solo la semana actual
+15.8 Debe diferenciar entre horas programadas y horas realmente ejecutadas
+
 ## Restricciones Técnicas
 
 - El backend debe usar Python Flask

@@ -55,6 +55,32 @@
 - [x] Implementar persistencia de estado de tareas
 - [x] Agregar logs detallados de ejecución
 
+### 2.4 Implementar API para Vista Semanal
+- [ ] Crear endpoint /api/weekly-schedule/{week_start_date}
+  - [x] Obtener todas las tareas programadas para una semana
+  - [x] Procesar datos de croniter para generar slots de tiempo
+  - [x] Formatear respuesta para consumo del frontend
+  - [x] Implementar cache de datos semanales
+- [ ] Crear endpoint /api/holidays/{year}
+  - [ ] Integrar con API de festivos colombianos
+  - [ ] Implementar cache de festivos por año
+  - [ ] Manejar festivos fijos y móviles
+- [ ] Crear endpoint /api/weekly-report/{week_start_date}
+  - [ ] Calcular horas de uso por namespace y centro de costo
+  - [ ] Generar estadísticas de eficiencia
+  - [ ] Soportar exportación en diferentes formatos
+- [ ] Crear endpoint /api/namespace-usage/{namespace_id}
+  - [ ] Obtener detalles de uso para namespace específico
+  - [ ] Calcular horas programadas vs ejecutadas
+  - [ ] Incluir información de centro de costo
+
+### 2.5 Optimizar Performance para Vista Semanal
+- [ ] Implementar cache Redis para datos semanales (opcional)
+- [ ] Optimizar queries a DynamoDB para rangos de fechas
+- [ ] Implementar paginación para datos grandes
+- [ ] Agregar índices apropiados para consultas semanales
+- [ ] Implementar compresión de respuestas para datos grandes
+
 ## 3. Frontend - Correcciones y Mejoras
 
 ### 3.1 Arreglar conexión con Backend
@@ -95,6 +121,61 @@
 - [ ] Implementar vista de actividad por cluster
 - [ ] Agregar reportes de trazabilidad de operaciones
 
+### 3.5 Implementar Vista Semanal del Dashboard
+- [ ] Crear componente WeeklyDashboard principal
+  - [ ] Diseñar estructura HTML para grilla 7x24
+  - [ ] Implementar CSS responsivo para la grilla semanal
+  - [ ] Integrar con la clase TaskScheduler existente
+- [ ] Implementar WeeklyGrid component
+  - [ ] Renderizar grilla de 7 días x 24 horas
+  - [ ] Mostrar namespaces programados en cada slot de tiempo
+  - [ ] Aplicar colores diferenciados por namespace/centro de costo
+  - [ ] Conectar visualmente slots continuos del mismo namespace
+- [ ] Crear NamespaceScheduleService
+  - [ ] Implementar obtención de datos de programación semanal
+  - [ ] Procesar y formatear datos para la vista de grilla
+  - [ ] Implementar cache de datos semanales
+  - [ ] Manejar estados de carga y errores
+
+### 3.6 Implementar Navegación Temporal
+- [ ] Crear NavigationControls component
+  - [ ] Botones para semana anterior/siguiente
+  - [ ] Botón "Semana Actual" para reset rápido
+  - [ ] Mostrar rango de fechas de la semana actual
+- [ ] Implementar lógica de navegación
+  - [ ] Calcular fechas de inicio/fin de semana
+  - [ ] Actualizar datos al cambiar de semana
+  - [ ] Mantener estado de semana seleccionada
+  - [ ] Implementar navegación con teclado (opcional)
+
+### 3.7 Integrar Marcado de Festivos Colombianos
+- [ ] Crear HolidayService component
+  - [ ] Implementar obtención de festivos colombianos
+  - [ ] Cache de datos de festivos por año
+  - [ ] Identificar si una fecha es festivo
+- [ ] Implementar marcado visual de festivos
+  - [ ] Aplicar estilos diferenciados a días festivos
+  - [ ] Mostrar tooltips con información del festivo
+  - [ ] Mantener funcionalidad normal en días festivos
+- [ ] Integrar con vista semanal
+  - [ ] Marcar columnas de días festivos
+  - [ ] Actualizar automáticamente para el año actual
+
+### 3.8 Implementar Sistema de Reportes Semanales
+- [ ] Crear ReportService component
+  - [ ] Calcular horas de uso por namespace
+  - [ ] Agrupar datos por centro de costo
+  - [ ] Generar totales y estadísticas
+- [ ] Implementar interfaz de reportes
+  - [ ] Tabla de reporte semanal en la interfaz
+  - [ ] Exportación a CSV
+  - [ ] Exportación a Excel (opcional)
+  - [ ] Filtros por semana específica
+- [ ] Integrar con vista semanal
+  - [ ] Botón para generar reporte de semana actual
+  - [ ] Mostrar resumen de horas en la vista
+  - [ ] Enlazar datos de grilla con reporte
+
 ## 4. Despliegue y CI/CD
 
 ### 4.1 Configurar ArgoCD
@@ -127,7 +208,25 @@
 - [ ] Probar límites de horarios no laborales
 - [ ] Probar manejo de errores y recuperación
 
-### 5.2 Testing de despliegue
+### 5.2 Testing de Vista Semanal
+- [ ] Probar carga de datos semanales
+  - [ ] Verificar datos correctos para semana actual
+  - [ ] Probar navegación entre semanas
+  - [ ] Validar cache de datos semanales
+- [ ] Probar marcado de festivos
+  - [ ] Verificar identificación correcta de festivos colombianos
+  - [ ] Probar marcado visual en la grilla
+  - [ ] Validar tooltips de información de festivos
+- [ ] Probar generación de reportes
+  - [ ] Verificar cálculos de horas por namespace
+  - [ ] Probar agrupación por centro de costo
+  - [ ] Validar exportación de reportes
+- [ ] Probar responsividad
+  - [ ] Verificar funcionamiento en móviles
+  - [ ] Probar scroll horizontal en pantallas pequeñas
+  - [ ] Validar legibilidad en diferentes tamaños
+
+### 5.3 Testing de despliegue
 - [ ] Probar despliegue completo con ArgoCD
 - [ ] Probar build automático con GitHub Actions
 - [ ] Probar rollback de versiones
@@ -142,6 +241,8 @@
 - [ ] Documentar configuración de variables de entorno
 - [ ] Crear troubleshooting guide
 - [ ] Documentar arquitectura y decisiones técnicas
+- [ ] Documentar nuevos endpoints de vista semanal
+- [ ] Crear guía de integración con API de festivos colombianos
 
 ### 6.2 Documentación de usuario
 - [ ] Crear manual de usuario para la interfaz web
@@ -149,6 +250,8 @@
 - [ ] Crear ejemplos de uso común
 - [ ] Documentar centros de costo y permisos
 - [ ] Crear FAQ de problemas comunes
+- [ ] Documentar uso de la vista semanal
+- [ ] Crear guía de interpretación de reportes semanales
 
 ## Notas de Implementación
 
@@ -169,9 +272,19 @@
 - Tareas 4.2, 4.3 (Configuración completa)
 - Tarea 5.1 (Testing básico)
 
+### Prioridad Alta - Vista Semanal (Nueva Funcionalidad Principal)
+- Tarea 2.4 (API para vista semanal)
+- Tareas 3.5, 3.6 (Componentes principales de vista semanal)
+- Tareas 3.7, 3.8 (Festivos colombianos y reportes semanales)
+- Tarea 5.2 (Testing de vista semanal)
+
+### Prioridad Media - Vista Semanal (Optimizaciones)
+- Tarea 2.5 (Optimizaciones de performance)
+- Documentación actualizada (6.1, 6.2)
+
 ### Prioridad Baja (Post-MVP)
-- Tarea 5.2 (Testing avanzado)
-- Tareas 6.1, 6.2 (Documentación completa)
+- Tarea 5.3 (Testing avanzado)
+- Documentación completa restante
 
 ### Dependencias Críticas
 - 1.1 → 1.2 (ECR debe existir antes de GitHub Actions)
@@ -179,3 +292,10 @@
 - 1.4 → 2.2 (RBAC debe funcionar para operaciones de namespaces)
 - 2.x → 3.x (Backend debe estar estable antes de frontend)
 - 4.1 requiere que 1.2 y 4.2 estén completos
+
+### Dependencias Vista Semanal
+- 2.4 → 3.5 (API de vista semanal debe estar lista antes del frontend)
+- 3.5 → 3.6 (Componente principal debe existir antes de navegación)
+- 2.4 → 3.7 (API de festivos debe estar lista antes del marcado)
+- 3.5, 2.4 → 3.8 (Vista semanal y API deben estar listas para reportes)
+- 3.5, 3.6, 3.7, 3.8 → 5.2 (Todos los componentes deben estar completos para testing)

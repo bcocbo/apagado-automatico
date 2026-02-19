@@ -1090,29 +1090,52 @@ class TaskScheduler {
     }
     
     addTaskToCalendar(task) {
-        // Format task for FullCalendar
-        const calendarEvent = {
-            id: task.id,
-            title: task.title,
-            start: task.start || task.created_at || new Date().toISOString(),
-            allDay: task.allDay !== undefined ? task.allDay : false,
-            extendedProps: {
-                status: task.status || 'pending',
-                operation_type: task.operation_type,
-                namespace: task.namespace,
-                cost_center: task.cost_center,
-                schedule: task.schedule,
-                command: task.command,
-                run_count: task.run_count || 0,
-                success_count: task.success_count || 0,
-                error_count: task.error_count || 0,
-                next_run: task.next_run
-            },
-            backgroundColor: this.getTaskColor(task.status),
-            borderColor: this.getTaskColor(task.status)
-        };
-        
-        this.calendar.addEvent(calendarEvent);
+        try {
+            // Validate task data
+            if (!task || !task.id || !task.title) {
+                console.warn('Invalid task data:', task);
+                return;
+            }
+
+            // Ensure we have a valid date
+            let startDate = task.start || task.created_at || new Date().toISOString();
+            
+            // Validate date format
+            if (!startDate || isNaN(new Date(startDate).getTime())) {
+                console.warn('Invalid date for task:', task.title, startDate);
+                startDate = new Date().toISOString();
+            }
+
+            // Format task for FullCalendar
+            const calendarEvent = {
+                id: task.id,
+                title: task.title,
+                start: startDate,
+                allDay: task.allDay !== undefined ? task.allDay : false,
+                extendedProps: {
+                    status: task.status || 'pending',
+                    operation_type: task.operation_type,
+                    namespace: task.namespace,
+                    cost_center: task.cost_center,
+                    schedule: task.schedule,
+                    command: task.command,
+                    run_count: task.run_count || 0,
+                    success_count: task.success_count || 0,
+                    error_count: task.error_count || 0,
+                    next_run: task.next_run,
+                    system_task: task.system_task || false
+                },
+                backgroundColor: this.getTaskColor(task.status),
+                borderColor: this.getTaskColor(task.status),
+                // Add class for system tasks
+                className: task.system_task ? 'system-task' : 'user-task'
+            };
+            
+            console.log('Adding task to calendar:', calendarEvent.title, calendarEvent.start);
+            this.calendar.addEvent(calendarEvent);
+        } catch (error) {
+            console.error('Error adding task to calendar:', error, task);
+        }
     }
     
     getTaskColor(status) {

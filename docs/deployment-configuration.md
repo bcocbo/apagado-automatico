@@ -185,6 +185,8 @@ env:
   value: "task-scheduler-logs-production"
 - name: PERMISSIONS_TABLE_NAME
   value: "cost-center-permissions-production"
+- name: LOG_LEVEL
+  value: "WARNING"
 - name: BUSINESS_HOURS_TIMEZONE
   value: "America/Bogota"
 - name: BUSINESS_START_HOUR
@@ -204,6 +206,7 @@ These variables are set in `manifests/overlays/production/task-scheduler-patch.y
 - **AWS_REGION**: AWS region for DynamoDB and other AWS service calls
 - **DYNAMODB_TABLE_NAME**: Production table for task execution logs (includes "-production" suffix)
 - **PERMISSIONS_TABLE_NAME**: Production table for cost center permissions (includes "-production" suffix)
+- **LOG_LEVEL**: Log level for production environment (set to "WARNING" to reduce log volume)
 - **BUSINESS_HOURS_TIMEZONE**: Timezone for business hours calculation (set to "America/Bogota" for Colombia)
 - **BUSINESS_START_HOUR**: Business day start hour in 24-hour format (8 AM)
 - **BUSINESS_END_HOUR**: Business day end hour in 24-hour format (6 PM)

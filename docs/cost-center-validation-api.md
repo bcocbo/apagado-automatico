@@ -130,6 +130,7 @@ When creating a scheduled task, the system:
 - Returns 403 error if the cost center is not authorized
 - Creates and schedules the task if validation passes
 - Logs the task creation to DynamoDB
+- Supports optional calendar fields (`start` and `allDay`) for frontend calendar integration
 
 ## Related Endpoints
 
@@ -139,6 +140,66 @@ When creating a scheduled task, the system:
 - **POST** `/api/namespaces/{namespace}/activate` - Activate a namespace (requires valid cost center)
 - **POST** `/api/namespaces/{namespace}/deactivate` - Deactivate a namespace (requires valid cost center)
 - **POST** `/api/tasks` - Create a scheduled task (requires valid cost center)
+
+### Task Creation API
+
+**POST** `/api/tasks`
+
+Creates a new scheduled task with cost center validation.
+
+#### Request Body
+
+```json
+{
+  "title": "string (required)",
+  "description": "string (optional)",
+  "command": "string (optional, required for 'command' operation_type)",
+  "schedule": "string (required, cron expression)",
+  "namespace": "string (required)",
+  "cost_center": "string (required)",
+  "operation_type": "string (optional, default: 'command')",
+  "start": "string (optional, ISO datetime for calendar display)",
+  "allDay": "boolean (optional, default: false, for calendar display)",
+  "requested_by": "string (optional, for audit tracking)"
+}
+```
+
+#### Response
+
+```json
+{
+  "id": "string (UUID)",
+  "title": "string",
+  "command": "string",
+  "schedule": "string",
+  "namespace": "string",
+  "cost_center": "string",
+  "operation_type": "string",
+  "status": "pending",
+  "created_at": "string (ISO datetime)",
+  "start": "string (ISO datetime)",
+  "allDay": "boolean",
+  "created_by": "string",
+  "last_run": null,
+  "next_run": "string (ISO datetime)",
+  "run_count": 0,
+  "success_count": 0,
+  "error_count": 0
+}
+```
+
+#### Field Descriptions
+
+- `title`: Descriptive name for the task
+- `description`: Optional detailed description
+- `command`: kubectl command to execute (required for 'command' operation_type)
+- `schedule`: Cron expression defining when the task runs
+- `namespace`: Target Kubernetes namespace
+- `cost_center`: Cost center for permission validation
+- `operation_type`: Type of operation ('command', 'activate', 'deactivate')
+- `start`: Optional start date/time for calendar visualization (defaults to creation time)
+- `allDay`: Optional flag for all-day calendar events (defaults to false)
+- `requested_by`: Optional user identifier for audit tracking
 
 ## Frontend Integration
 

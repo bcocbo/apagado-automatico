@@ -28,18 +28,17 @@ Aunque el RBAC proporciona protección a nivel de Kubernetes, se recomienda impl
 
 ### 2. Namespaces Protegidos
 
-Los siguientes namespaces están protegidos mediante RoleBindings de solo lectura y NO pueden ser desescalados:
+Los siguientes namespaces están protegidos mediante RoleBindings de solo lectura y validación en el backend, y NO pueden ser desescalados:
 
+- `karpenter` - Autoscaling de nodos (crítico para el cluster)
+- `kyverno` - Policy engine (crítico para enforcement de políticas)
+- `argocd` - Sistema de despliegue continuo (crítico para CI/CD)
 - `kube-system` - Componentes core de Kubernetes
-- `kube-public` - Recursos públicos de Kubernetes
-- `kube-node-lease` - Leases de nodos
-- `argocd` - Sistema de despliegue continuo
-- `istio-system` - Service mesh
-- `kyverno` - Policy engine
+- `istio-system` - Service mesh (crítico para networking)
+- `monitoring` - Sistema de observabilidad (crítico para monitoreo)
 - `task-scheduler` - El propio namespace del scheduler
-- `karpenter` - Autoscaling de nodos (NUEVO)
-- `keda` - Event-driven autoscaling (NUEVO)
-- `vision` - Sistema de monitoreo/observabilidad (NUEVO)
+
+**Nota**: La lista actualizada refleja la implementación actual en el método `is_protected_namespace()` del backend.
 
 Cada uno de estos namespaces tiene un RoleBinding que vincula el service account `kubectl-runner` al ClusterRole `kubectl-runner-readonly`, lo que sobrescribe los permisos de escritura del ClusterRoleBinding global.
 
@@ -116,41 +115,26 @@ subjects:
   namespace: task-scheduler
 ```
 
-### 4. Implementación en el Backend (Opcional pero Recomendada)
+### 4. Implementación en el Backend (Implementada)
 
-El backend debe implementar una lista de namespaces protegidos:
+El backend ahora incluye el método `is_protected_namespace()` que implementa la validación de namespaces protegidos:
 
 ```python
-# Lista de namespaces protegidos que no pueden ser desescalados
-PROTECTED_NAMESPACES = [
-    'kube-system',
-    'kube-public',
-    'kube-node-lease',
-    'argocd',
-    'istio-system',
-    'kyverno',
-    'task-scheduler',
-    'karpenter',
-    'keda',
-    'vision',
-    'default'  # Opcional: proteger el namespace default
-]
-
-def is_namespace_protected(namespace_name):
-    """
-    Verifica si un namespace está protegido
-    """
-    return namespace_name in PROTECTED_NAMESPACES
-
-def validate_namespace_operation(namespace_name, operation):
-    """
-    Valida si una operación puede realizarse en un namespace
-    """
-    if is_namespace_protected(namespace_name):
-        raise ValueError(
-            f"El namespace '{namespace_name}' está protegido y no puede ser {operation}"
-        )
+def is_protected_namespace(self, namespace_name):
+    """Check if a namespace is protected and cannot be activated/deactivated"""
+    protected_namespaces = [
+        'karpenter',     # Critical for cluster autoscaling
+        'kyverno',       # Critical for policy enforcement
+        'argocd',        # Critical for CI/CD operations
+        'kube-system',   # Core Kubernetes system
+        'istio-system',  # Service mesh - critical for networking
+        'monitoring',    # Critical for observability
+        'task-scheduler' # This application itself
+    ]
+    return namespace_name in protected_namespaces
 ```
+
+Este método debe ser utilizado en todos los endpoints que modifican el estado de los namespaces para prevenir operaciones no autorizadas.
 
 ### 5. Validación en Endpoints
 
@@ -159,8 +143,8 @@ Todos los endpoints que modifican namespaces deben validar:
 ```python
 @app.route('/api/namespaces/<namespace>/activate', methods=['POST'])
 def activate_namespace(namespace):
-    # Validar que el namespace no esté protegido
-    if is_namespace_protected(namespace):
+    # Validar que el namespace no esté protegido usando el método implementado
+    if self.is_protected_namespace(namespace):
         return jsonify({
             'error': f'El namespace {namespace} está protegido y no puede ser activado/desactivado',
             'protected': True
@@ -183,8 +167,8 @@ def list_namespaces():
         result.append({
             'name': ns.metadata.name,
             'status': get_namespace_status(ns),
-            'protected': is_namespace_protected(ns.metadata.name),
-            'can_scale': not is_namespace_protected(ns.metadata.name)
+            'protected': self.is_protected_namespace(ns.metadata.name),
+            'can_scale': not self.is_protected_namespace(ns.metadata.name)
         })
     
     return jsonify(result)
@@ -236,12 +220,12 @@ metadata:
   namespace: task-scheduler
 data:
   protected-namespaces: |
-    kube-system
-    kube-public
-    kube-node-lease
-    argocd
-    istio-system
+    karpenter
     kyverno
+    argocd
+    kube-system
+    istio-system
+    monitoring
     task-scheduler
 ```
 
@@ -250,7 +234,7 @@ data:
 ```yaml
 env:
 - name: PROTECTED_NAMESPACES
-  value: "kube-system,kube-public,kube-node-lease,argocd,istio-system,kyverno,task-scheduler,karpenter,keda,vision"
+  value: "karpenter,kyverno,argocd,kube-system,istio-system,monitoring,task-scheduler"
 ```
 
 ## Permisos para Otros Namespaces

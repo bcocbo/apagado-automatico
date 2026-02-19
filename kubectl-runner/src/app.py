@@ -688,6 +688,11 @@ class TaskScheduler:
         self.task_futures = {}  # Maps task_id to Future object
         self.task_locks = {}  # Maps task_id to Lock for thread-safe operations
         
+        # Weekly schedule cache
+        self.weekly_cache = {}  # Maps week_start_date to cached data
+        self.weekly_cache_ttl = int(os.getenv('WEEKLY_CACHE_TTL', '300'))  # Default 5 minutes
+        self.weekly_cache_enabled = os.getenv('WEEKLY_CACHE_ENABLED', 'true').lower() == 'true'
+        
         # Persistence configuration
         self.auto_save_enabled = os.getenv('AUTO_SAVE_ENABLED', 'true').lower() == 'true'
         self.auto_save_interval = int(os.getenv('AUTO_SAVE_INTERVAL_SECONDS', '300'))  # 5 minutes default
@@ -756,6 +761,19 @@ class TaskScheduler:
             'task-scheduler'  # Our own namespace
         ]
         return namespace_name in system_namespaces
+
+    def is_protected_namespace(self, namespace_name):
+        """Check if a namespace is protected and cannot be activated/deactivated"""
+        protected_namespaces = [
+            'karpenter',     # Critical for cluster autoscaling
+            'kyverno',       # Critical for policy enforcement
+            'argocd',        # Critical for CI/CD operations
+            'kube-system',   # Core Kubernetes system
+            'istio-system',  # Service mesh - critical for networking
+            'monitoring',    # Critical for observability
+            'task-scheduler' # This application itself
+        ]
+        return namespace_name in protected_namespaces
 
     def is_namespace_active(self, namespace_name):
         """Check if a namespace is active (has running pods or scaled deployments)"""
@@ -2594,6 +2612,429 @@ class TaskScheduler:
         scheduler_thread.start()
         logger.info("Task scheduler started with periodic cleanup")
 
+    def get_weekly_scheduled_tasks(self, week_start_date):
+        """
+        Get all scheduled tasks for a specific week
+        
+        Args:
+            week_start_date: datetime object representing the start of the week (Monday)
+        
+        Returns:
+            List of tasks that are scheduled to run during the specified week
+        """
+        try:
+            from datetime import timedelta
+            
+            # Calculate week end date (Sunday)
+            week_end_date = week_start_date + timedelta(days=6, hours=23, minutes=59, seconds=59)
+            
+            weekly_tasks = []
+            
+            # Iterate through all tasks
+            for task_id, task in self.tasks.items():
+                # Skip tasks without schedule (one-time tasks)
+                if not task.get('schedule'):
+                    continue
+                
+                # Skip non-pending tasks for future scheduling
+                if task.get('status') not in ['pending', 'running']:
+                    continue
+                
+                try:
+                    # Get all occurrences of this task during the week
+                    task_occurrences = self._get_task_occurrences_in_week(
+                        task, week_start_date, week_end_date
+                    )
+                    
+                    # Add each occurrence to the weekly tasks list
+                    for occurrence in task_occurrences:
+                        weekly_task = {
+                            'task_id': task_id,
+                            'title': task.get('title', ''),
+                            'namespace': task.get('namespace', ''),
+                            'cost_center': task.get('cost_center', ''),
+                            'operation_type': task.get('operation_type', ''),
+                            'schedule': task.get('schedule', ''),
+                            'scheduled_time': occurrence['scheduled_time'],
+                            'day_of_week': occurrence['day_of_week'],
+                            'hour': occurrence['hour'],
+                            'minute': occurrence['minute'],
+                            'created_by': task.get('created_by', ''),
+                            'status': task.get('status', 'pending')
+                        }
+                        weekly_tasks.append(weekly_task)
+                        
+                except Exception as task_error:
+                    logger.error(f"Error processing task {task_id} for weekly schedule: {task_error}")
+                    continue
+            
+            # Sort by scheduled time
+            weekly_tasks.sort(key=lambda x: x['scheduled_time'])
+            
+            logger.info(f"Found {len(weekly_tasks)} scheduled task occurrences for week starting {week_start_date.strftime('%Y-%m-%d')}")
+            return weekly_tasks
+            
+        except Exception as e:
+            logger.error(f"Error getting weekly scheduled tasks: {e}")
+            return []
+
+    def _get_task_occurrences_in_week(self, task, week_start, week_end):
+        """
+        Get all occurrences of a task within a specific week
+        
+        Args:
+            task: Task dictionary
+            week_start: Start of week datetime
+            week_end: End of week datetime
+        
+        Returns:
+            List of occurrence dictionaries with scheduled_time, day_of_week, hour, minute
+        """
+        try:
+            cron_expression = task.get('schedule', '')
+            if not cron_expression:
+                return []
+            
+            occurrences = []
+            
+            # Use croniter to find all occurrences in the week
+            cron = croniter(cron_expression, week_start)
+            
+            # Get up to 50 occurrences to prevent infinite loops
+            max_occurrences = 50
+            occurrence_count = 0
+            
+            while occurrence_count < max_occurrences:
+                next_occurrence = cron.get_next(datetime)
+                
+                # If we've passed the end of the week, stop
+                if next_occurrence > week_end:
+                    break
+                
+                # Add this occurrence
+                occurrences.append({
+                    'scheduled_time': next_occurrence.isoformat(),
+                    'day_of_week': next_occurrence.weekday(),  # 0=Monday, 6=Sunday
+                    'hour': next_occurrence.hour,
+                    'minute': next_occurrence.minute
+                })
+                
+                occurrence_count += 1
+            
+            return occurrences
+            
+        except Exception as e:
+            logger.error(f"Error getting task occurrences: {e}")
+            return []
+
+    def process_weekly_tasks_to_time_slots(self, weekly_tasks, week_start_date):
+        """
+        Process weekly tasks into a 7x24 time slot grid structure
+        
+        Args:
+            weekly_tasks: List of task occurrences from get_weekly_scheduled_tasks
+            week_start_date: datetime object representing the start of the week
+        
+        Returns:
+            Dictionary with time slots organized by day and hour
+        """
+        try:
+            from datetime import timedelta
+            
+            # Initialize the time slots structure
+            time_slots = {}
+            
+            # Days of the week (0=Monday, 6=Sunday)
+            day_names = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+            
+            # Initialize empty slots for each day and hour
+            for day_index, day_name in enumerate(day_names):
+                time_slots[day_name] = {}
+                for hour in range(24):
+                    time_slots[day_name][f"{hour:02d}"] = []
+            
+            # Process each task occurrence
+            for task in weekly_tasks:
+                try:
+                    # Parse the scheduled time
+                    scheduled_time = datetime.fromisoformat(task['scheduled_time'])
+                    
+                    # Get day of week and hour
+                    day_of_week = scheduled_time.weekday()  # 0=Monday, 6=Sunday
+                    hour = scheduled_time.hour
+                    
+                    # Get the day name
+                    day_name = day_names[day_of_week]
+                    hour_key = f"{hour:02d}"
+                    
+                    # Create the task slot data
+                    task_slot = {
+                        'task_id': task['task_id'],
+                        'namespace_id': task['namespace'],
+                        'namespace_name': task['namespace'],
+                        'cost_center': task['cost_center'],
+                        'title': task['title'],
+                        'operation_type': task['operation_type'],
+                        'scheduled_time': task['scheduled_time'],
+                        'minute': task['minute'],
+                        'is_active': task['operation_type'] == 'activate',
+                        'schedule_type': 'cron',
+                        'duration': self._estimate_task_duration(task),
+                        'created_by': task.get('created_by', ''),
+                        'status': task.get('status', 'pending')
+                    }
+                    
+                    # Add to the appropriate time slot
+                    time_slots[day_name][hour_key].append(task_slot)
+                    
+                except Exception as task_error:
+                    logger.error(f"Error processing task {task.get('task_id', 'unknown')} into time slots: {task_error}")
+                    continue
+            
+            # Sort tasks within each time slot by minute
+            for day_name in day_names:
+                for hour_key in time_slots[day_name]:
+                    time_slots[day_name][hour_key].sort(key=lambda x: x['minute'])
+            
+            logger.info(f"Processed {len(weekly_tasks)} tasks into time slots for week starting {week_start_date.strftime('%Y-%m-%d')}")
+            return time_slots
+            
+        except Exception as e:
+            logger.error(f"Error processing weekly tasks to time slots: {e}")
+            return {}
+
+    def _estimate_task_duration(self, task):
+        """
+        Estimate task duration in minutes based on operation type
+        
+        Args:
+            task: Task dictionary
+        
+        Returns:
+            Estimated duration in minutes
+        """
+        operation_type = task.get('operation_type', 'command')
+        
+        # Default durations based on operation type
+        duration_map = {
+            'activate': 5,      # Namespace activation typically takes a few minutes
+            'deactivate': 2,    # Deactivation is usually faster
+            'command': 1        # Custom commands vary, default to 1 minute
+        }
+        
+        return duration_map.get(operation_type, 1)
+
+    def format_weekly_schedule_response(self, week_start_date, time_slots):
+        """
+        Format weekly schedule data for frontend consumption
+        
+        Args:
+            week_start_date: datetime object representing the start of the week
+            time_slots: Time slots dictionary from process_weekly_tasks_to_time_slots
+        
+        Returns:
+            Formatted response dictionary for the frontend
+        """
+        try:
+            from datetime import timedelta
+            
+            # Calculate week end date
+            week_end_date = week_start_date + timedelta(days=6)
+            
+            # Format the response
+            response = {
+                'success': True,
+                'data': {
+                    'week_start_date': week_start_date.strftime('%Y-%m-%d'),
+                    'week_end_date': week_end_date.strftime('%Y-%m-%d'),
+                    'time_slots': time_slots,
+                    'metadata': {
+                        'total_tasks': self._count_total_tasks_in_slots(time_slots),
+                        'active_namespaces': self._get_unique_namespaces_in_slots(time_slots),
+                        'cost_centers': self._get_unique_cost_centers_in_slots(time_slots),
+                        'generated_at': datetime.now().isoformat(),
+                        'timezone': 'UTC'  # TODO: Make this configurable
+                    }
+                }
+            }
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error formatting weekly schedule response: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'data': None
+            }
+
+    def _count_total_tasks_in_slots(self, time_slots):
+        """Count total number of tasks across all time slots"""
+        total = 0
+        for day_slots in time_slots.values():
+            for hour_tasks in day_slots.values():
+                total += len(hour_tasks)
+        return total
+
+    def _get_unique_namespaces_in_slots(self, time_slots):
+        """Get list of unique namespaces in the time slots"""
+        namespaces = set()
+        for day_slots in time_slots.values():
+            for hour_tasks in day_slots.values():
+                for task in hour_tasks:
+                    namespaces.add(task['namespace_name'])
+        return sorted(list(namespaces))
+
+    def _get_unique_cost_centers_in_slots(self, time_slots):
+        """Get list of unique cost centers in the time slots"""
+        cost_centers = set()
+        for day_slots in time_slots.values():
+            for hour_tasks in day_slots.values():
+                for task in hour_tasks:
+                    cost_centers.add(task['cost_center'])
+        return sorted(list(cost_centers))
+
+    def get_weekly_schedule_cached(self, week_start_date):
+        """
+        Get weekly schedule with caching support
+        
+        Args:
+            week_start_date: datetime object representing the start of the week
+        
+        Returns:
+            Formatted weekly schedule response
+        """
+        try:
+            # Check cache first if enabled
+            if self.weekly_cache_enabled:
+                cached_data = self._get_weekly_cache(week_start_date)
+                if cached_data is not None:
+                    logger.debug(f"Weekly cache hit for {week_start_date.strftime('%Y-%m-%d')}")
+                    return cached_data
+            
+            # Cache miss - generate fresh data
+            logger.debug(f"Weekly cache miss for {week_start_date.strftime('%Y-%m-%d')}, generating fresh data")
+            
+            # Get all scheduled tasks for the week
+            weekly_tasks = self.get_weekly_scheduled_tasks(week_start_date)
+            
+            # Process tasks into time slots
+            time_slots = self.process_weekly_tasks_to_time_slots(weekly_tasks, week_start_date)
+            
+            # Format response for frontend
+            response = self.format_weekly_schedule_response(week_start_date, time_slots)
+            
+            # Cache the result if caching is enabled
+            if self.weekly_cache_enabled:
+                self._put_weekly_cache(week_start_date, response)
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error getting cached weekly schedule: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'data': None
+            }
+
+    def _get_weekly_cache(self, week_start_date):
+        """Get weekly schedule data from cache"""
+        try:
+            cache_key = week_start_date.strftime('%Y-%m-%d')
+            
+            if cache_key in self.weekly_cache:
+                cache_entry = self.weekly_cache[cache_key]
+                
+                # Check if cache entry is still valid
+                if time.time() - cache_entry['timestamp'] < self.weekly_cache_ttl:
+                    return cache_entry['data']
+                else:
+                    # Cache expired, remove it
+                    logger.debug(f"Weekly cache expired for {cache_key}")
+                    del self.weekly_cache[cache_key]
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error getting weekly cache: {e}")
+            return None
+
+    def _put_weekly_cache(self, week_start_date, data):
+        """Put weekly schedule data in cache"""
+        try:
+            cache_key = week_start_date.strftime('%Y-%m-%d')
+            
+            self.weekly_cache[cache_key] = {
+                'data': data,
+                'timestamp': time.time()
+            }
+            
+            logger.debug(f"Cached weekly schedule for {cache_key}")
+            
+            # Clean up old cache entries to prevent memory leaks
+            self._cleanup_weekly_cache()
+            
+        except Exception as e:
+            logger.error(f"Error putting weekly cache: {e}")
+
+    def _cleanup_weekly_cache(self):
+        """Clean up expired cache entries"""
+        try:
+            current_time = time.time()
+            expired_keys = []
+            
+            for cache_key, cache_entry in self.weekly_cache.items():
+                if current_time - cache_entry['timestamp'] >= self.weekly_cache_ttl:
+                    expired_keys.append(cache_key)
+            
+            for key in expired_keys:
+                del self.weekly_cache[key]
+            
+            if expired_keys:
+                logger.debug(f"Cleaned up {len(expired_keys)} expired weekly cache entries")
+                
+        except Exception as e:
+            logger.error(f"Error cleaning up weekly cache: {e}")
+
+    def invalidate_weekly_cache(self, week_start_date=None):
+        """
+        Invalidate weekly cache for a specific week or all cache
+        
+        Args:
+            week_start_date: Optional datetime object. If None, clears all cache
+        """
+        try:
+            if week_start_date:
+                cache_key = week_start_date.strftime('%Y-%m-%d')
+                if cache_key in self.weekly_cache:
+                    del self.weekly_cache[cache_key]
+                    logger.info(f"Invalidated weekly cache for {cache_key}")
+            else:
+                cache_count = len(self.weekly_cache)
+                self.weekly_cache.clear()
+                logger.info(f"Invalidated all weekly cache ({cache_count} entries)")
+                
+        except Exception as e:
+            logger.error(f"Error invalidating weekly cache: {e}")
+
+    def get_weekly_cache_stats(self):
+        """Get weekly cache statistics"""
+        try:
+            return {
+                'enabled': self.weekly_cache_enabled,
+                'ttl_seconds': self.weekly_cache_ttl,
+                'cached_entries': len(self.weekly_cache),
+                'cache_keys': list(self.weekly_cache.keys()),
+                'total_memory_entries': len(self.weekly_cache)
+            }
+        except Exception as e:
+            logger.error(f"Error getting weekly cache stats: {e}")
+            return {
+                'enabled': False,
+                'error': str(e)
+            }
+
 # Initialize scheduler
 scheduler = TaskScheduler()
 
@@ -2906,6 +3347,15 @@ def get_namespaces():
 def activate_namespace(namespace):
     """Activate a namespace"""
     try:
+        # Check if namespace is protected
+        if scheduler.is_protected_namespace(namespace):
+            return jsonify({
+                'success': False,
+                'error': f'Namespace "{namespace}" is protected and cannot be activated/deactivated',
+                'protected': True,
+                'reason': 'This namespace is critical for cluster operations'
+            }), 403
+        
         data = request.get_json() or {}
         cost_center = data.get('cost_center', 'default')
         user_id = data.get('user_id', 'anonymous')
@@ -2926,6 +3376,15 @@ def activate_namespace(namespace):
 def deactivate_namespace(namespace):
     """Deactivate a namespace"""
     try:
+        # Check if namespace is protected
+        if scheduler.is_protected_namespace(namespace):
+            return jsonify({
+                'success': False,
+                'error': f'Namespace "{namespace}" is protected and cannot be activated/deactivated',
+                'protected': True,
+                'reason': 'This namespace is critical for cluster operations'
+            }), 403
+        
         data = request.get_json() or {}
         cost_center = data.get('cost_center', 'default')
         user_id = data.get('user_id', 'anonymous')
@@ -3512,6 +3971,81 @@ def create_batch_tasks_internal(data):
         'created_tasks': created_tasks,
         'failed_tasks': failed_tasks if failed_tasks else None
     })
+
+@app.route('/api/weekly-schedule/<week_start_date>', methods=['GET'])
+def get_weekly_schedule(week_start_date):
+    """
+    Get weekly schedule for a specific week
+    
+    Args:
+        week_start_date: Date string in YYYY-MM-DD format representing Monday of the week
+    
+    Returns:
+        JSON response with weekly schedule data organized in 7x24 time slots
+    """
+    try:
+        # Parse the week start date
+        try:
+            week_start = datetime.strptime(week_start_date, '%Y-%m-%d')
+        except ValueError:
+            return jsonify({
+                'success': False,
+                'error': 'Invalid date format. Use YYYY-MM-DD format.'
+            }), 400
+        
+        # Ensure the date is a Monday (weekday 0)
+        if week_start.weekday() != 0:
+            # Adjust to the Monday of that week
+            days_since_monday = week_start.weekday()
+            week_start = week_start - timedelta(days=days_since_monday)
+            logger.info(f"Adjusted week start date to Monday: {week_start.strftime('%Y-%m-%d')}")
+        
+        # Get all scheduled tasks for the week (with caching)
+        response = scheduler.get_weekly_schedule_cached(week_start)
+        
+        logger.info(f"Generated weekly schedule for {week_start_date}")
+        
+        return jsonify(response)
+        
+    except Exception as e:
+        logger.error(f"Error getting weekly schedule for {week_start_date}: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'data': None
+        }), 500
+
+@app.route('/api/weekly-schedule/cache/stats', methods=['GET'])
+def get_weekly_cache_stats():
+    """Get weekly schedule cache statistics"""
+    try:
+        stats = scheduler.get_weekly_cache_stats()
+        return jsonify(stats)
+    except Exception as e:
+        logger.error(f"Error getting weekly cache stats: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/weekly-schedule/cache/invalidate', methods=['POST'])
+def invalidate_weekly_cache():
+    """Invalidate weekly schedule cache"""
+    try:
+        data = request.get_json() or {}
+        week_start_date_str = data.get('week_start_date')
+        
+        if week_start_date_str:
+            try:
+                week_start_date = datetime.strptime(week_start_date_str, '%Y-%m-%d')
+                scheduler.invalidate_weekly_cache(week_start_date)
+                return jsonify({'message': f'Weekly cache invalidated for {week_start_date_str}'})
+            except ValueError:
+                return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD format.'}), 400
+        else:
+            scheduler.invalidate_weekly_cache()
+            return jsonify({'message': 'All weekly cache invalidated'})
+            
+    except Exception as e:
+        logger.error(f"Error invalidating weekly cache: {e}")
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     # Start the Flask app

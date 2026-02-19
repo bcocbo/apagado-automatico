@@ -49,6 +49,7 @@ Sección principal para gestión de tareas y namespaces.
 - Visualización de tareas programadas en formato calendario
 - Integración con FullCalendar para vista mensual/semanal/diaria
 - Permite crear, editar y eliminar tareas
+- Soporte para campos de calendario (`start` y `allDay`) para mejor visualización temporal
 - Modal de detalles mejorado para cada tarea con:
   - Información completa con badges y formato visual
   - Estadísticas de ejecución (total, exitosas, fallidas)
@@ -81,6 +82,8 @@ Permite crear tareas programadas con los siguientes campos:
 - **Programación (Cron)**: Expresión cron para definir frecuencia
 - **Namespace**: Selector de namespace objetivo
 - **Centro de Costo**: Selector de centro de costo para validación
+- **Fecha de Inicio**: Campo opcional para especificar cuándo debe comenzar la tarea (para visualización en calendario)
+- **Todo el Día**: Checkbox opcional para marcar tareas que duran todo el día (para visualización en calendario)
 
 **Mejoras de UX Implementadas:**
 - Validación de centro de costo antes de crear la tarea
@@ -235,6 +238,10 @@ Sección para visualizar el historial de ejecuciones:
 - [x] Feedback visual con indicadores de validación
 - [x] Soporte para campo de descripción opcional
 - [x] Garantía de rehabilitación del botón incluso si ocurre un error
+- [x] **Campos de calendario integrados** ✨ NUEVO
+  - Campo `start` opcional para especificar fecha/hora de inicio de la tarea
+  - Campo `allDay` opcional para marcar tareas de todo el día
+  - Mejora la visualización y organización en el calendario FullCalendar
 - [x] **Validación en tiempo real de expresiones cron** ✨ NUEVO
   - Validación automática mientras el usuario escribe (eventos `input` y `blur`)
   - Soporte completo para sintaxis cron de 5 campos (minuto hora día mes día-semana)
@@ -308,7 +315,7 @@ Sección para visualizar el historial de ejecuciones:
 ### Tareas
 
 - `GET /api/tasks` - Lista de tareas programadas
-- `POST /api/tasks` - Crear nueva tarea
+- `POST /api/tasks` - Crear nueva tarea (incluye campos `start` y `allDay` para calendario)
 - `GET /api/tasks/{id}` - Detalles de tarea específica
 - `PUT /api/tasks/{id}` - Actualizar tarea existente
 - `DELETE /api/tasks/{id}` - Eliminar tarea
