@@ -56,7 +56,7 @@
 - [x] Agregar logs detallados de ejecución
 
 ### 2.4 Implementar API para Vista Semanal
-- [ ] Crear endpoint /api/weekly-schedule/{week_start_date}
+- [x] Crear endpoint /api/weekly-schedule/{week_start_date}
   - [x] Obtener todas las tareas programadas para una semana
   - [x] Procesar datos de croniter para generar slots de tiempo
   - [x] Formatear respuesta para consumo del frontend
@@ -122,31 +122,31 @@
 - [ ] Agregar reportes de trazabilidad de operaciones
 
 ### 3.5 Implementar Vista Semanal del Dashboard
-- [ ] Crear componente WeeklyDashboard principal
-  - [ ] Diseñar estructura HTML para grilla 7x24
-  - [ ] Implementar CSS responsivo para la grilla semanal
-  - [ ] Integrar con la clase TaskScheduler existente
-- [ ] Implementar WeeklyGrid component
-  - [ ] Renderizar grilla de 7 días x 24 horas
-  - [ ] Mostrar namespaces programados en cada slot de tiempo
-  - [ ] Aplicar colores diferenciados por namespace/centro de costo
-  - [ ] Conectar visualmente slots continuos del mismo namespace
-- [ ] Crear NamespaceScheduleService
-  - [ ] Implementar obtención de datos de programación semanal
-  - [ ] Procesar y formatear datos para la vista de grilla
-  - [ ] Implementar cache de datos semanales
-  - [ ] Manejar estados de carga y errores
+- [x] Crear componente WeeklyDashboard principal
+  - [x] Diseñar estructura HTML para grilla 7x24
+  - [x] Implementar CSS responsivo para la grilla semanal
+  - [x] Integrar con la clase TaskScheduler existente
+- [x] Implementar WeeklyGrid component
+  - [x] Renderizar grilla de 7 días x 24 horas
+  - [x] Mostrar namespaces programados en cada slot de tiempo
+  - [x] Aplicar colores diferenciados por namespace/centro de costo
+  - [x] Conectar visualmente slots continuos del mismo namespace
+- [x] Crear NamespaceScheduleService
+  - [x] Implementar obtención de datos de programación semanal
+  - [x] Procesar y formatear datos para la vista de grilla
+  - [x] Implementar cache de datos semanales
+  - [x] Manejar estados de carga y errores
 
 ### 3.6 Implementar Navegación Temporal
-- [ ] Crear NavigationControls component
-  - [ ] Botones para semana anterior/siguiente
-  - [ ] Botón "Semana Actual" para reset rápido
-  - [ ] Mostrar rango de fechas de la semana actual
-- [ ] Implementar lógica de navegación
-  - [ ] Calcular fechas de inicio/fin de semana
-  - [ ] Actualizar datos al cambiar de semana
-  - [ ] Mantener estado de semana seleccionada
-  - [ ] Implementar navegación con teclado (opcional)
+- [x] Crear NavigationControls component
+  - [x] Botones para semana anterior/siguiente
+  - [x] Botón "Semana Actual" para reset rápido
+  - [x] Mostrar rango de fechas de la semana actual
+- [x] Implementar lógica de navegación
+  - [x] Calcular fechas de inicio/fin de semana
+  - [x] Actualizar datos al cambiar de semana
+  - [x] Mantener estado de semana seleccionada
+  - [x] Implementar navegación con teclado (opcional)
 
 ### 3.7 Integrar Marcado de Festivos Colombianos
 - [ ] Crear HolidayService component

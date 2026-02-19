@@ -253,11 +253,252 @@ class WeeklyDashboard {
         console.log(`Clicked time slot: ${this.dayDisplayNames[dayIndex]} ${hour}:00`, tasks);
         
         if (tasks.length === 0) {
-            // Could open a "create task" modal here
-            console.log('Empty slot clicked - could create new task');
+            // Show modal to create new task for this time slot
+            this.showCreateTaskModal(dayIndex, hour);
         } else {
-            // Show tasks in this slot
-            console.log('Time slot with tasks clicked');
+            // Show existing tasks in this slot
+            this.showTasksInSlot(dayIndex, hour, tasks);
+        }
+    }
+
+    /**
+     * Show modal to create a new task for a specific time slot
+     */
+    showCreateTaskModal(dayIndex, hour) {
+        // Create and show a modal for task creation
+        const modal = this.createTaskCreationModal(dayIndex, hour);
+        document.body.appendChild(modal);
+        
+        // Show the modal using Bootstrap
+        const bootstrapModal = new bootstrap.Modal(modal);
+        bootstrapModal.show();
+        
+        // Clean up modal when hidden
+        modal.addEventListener('hidden.bs.modal', () => {
+            document.body.removeChild(modal);
+        });
+    }
+
+    /**
+     * Create task creation modal HTML
+     */
+    createTaskCreationModal(dayIndex, hour) {
+        const dayName = this.dayDisplayNames[dayIndex];
+        const timeString = `${hour.toString().padStart(2, '0')}:00`;
+        
+        const modal = document.createElement('div');
+        modal.className = 'modal fade';
+        modal.id = 'weeklyTaskModal';
+        modal.tabIndex = -1;
+        
+        modal.innerHTML = `
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">
+                            <i class="fas fa-plus-circle"></i> 
+                            Programar Tarea - ${dayName} ${timeString}
+                        </h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <form id="weeklyTaskForm">
+                            <div class="mb-3">
+                                <label for="taskNamespace" class="form-label">Namespace <span class="text-danger">*</span></label>
+                                <select class="form-control" id="taskNamespace" required>
+                                    <option value="">Cargando namespaces...</option>
+                                </select>
+                                <small class="form-text text-muted">Selecciona el namespace a programar</small>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="taskOperation" class="form-label">Operación <span class="text-danger">*</span></label>
+                                <select class="form-control" id="taskOperation" required>
+                                    <option value="activate">Activar Namespace</option>
+                                    <option value="deactivate">Desactivar Namespace</option>
+                                </select>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="taskCostCenter" class="form-label">Centro de Costo <span class="text-danger">*</span></label>
+                                <select class="form-control" id="taskCostCenter" required>
+                                    <option value="">Seleccionar...</option>
+                                    <option value="default">default</option>
+                                    <option value="development">development</option>
+                                    <option value="testing">testing</option>
+                                    <option value="production">production</option>
+                                </select>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="taskMinute" class="form-label">Minuto</label>
+                                <select class="form-control" id="taskMinute">
+                                    <option value="0">00 (inicio de hora)</option>
+                                    <option value="15">15</option>
+                                    <option value="30">30</option>
+                                    <option value="45">45</option>
+                                </select>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="taskDescription" class="form-label">Descripción (opcional)</label>
+                                <textarea class="form-control" id="taskDescription" rows="2" 
+                                    placeholder="Descripción adicional de la tarea"></textarea>
+                            </div>
+                            
+                            <div class="alert alert-info">
+                                <i class="fas fa-info-circle"></i>
+                                <strong>Programación:</strong> ${dayName} a las ${timeString}
+                            </div>
+                        </form>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="button" class="btn btn-primary" onclick="weeklyDashboard.createTaskFromModal(${dayIndex}, ${hour})">
+                            <i class="fas fa-save"></i> Crear Tarea
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // Load schedulable namespaces when modal is shown
+        modal.addEventListener('shown.bs.modal', () => {
+            this.loadSchedulableNamespaces();
+        });
+        
+        return modal;
+    }
+
+    /**
+     * Load schedulable namespaces for the modal
+     */
+    async loadSchedulableNamespaces() {
+        try {
+            const response = await fetch('/api/namespaces/schedulable');
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
+            const data = await response.json();
+            const select = document.getElementById('taskNamespace');
+            
+            if (select) {
+                select.innerHTML = '<option value="">Seleccionar namespace...</option>';
+                
+                data.schedulable_namespaces.forEach(ns => {
+                    const option = document.createElement('option');
+                    option.value = ns.name;
+                    option.textContent = `${ns.name} ${ns.is_active ? '(activo)' : '(inactivo)'}`;
+                    select.appendChild(option);
+                });
+            }
+            
+        } catch (error) {
+            console.error('Error loading schedulable namespaces:', error);
+            const select = document.getElementById('taskNamespace');
+            if (select) {
+                select.innerHTML = '<option value="">Error cargando namespaces</option>';
+            }
+        }
+    }
+
+    /**
+     * Create task from modal form
+     */
+    async createTaskFromModal(dayIndex, hour) {
+        try {
+            const form = document.getElementById('weeklyTaskForm');
+            const formData = new FormData(form);
+            
+            const namespace = document.getElementById('taskNamespace').value;
+            const operation = document.getElementById('taskOperation').value;
+            const costCenter = document.getElementById('taskCostCenter').value;
+            const minute = parseInt(document.getElementById('taskMinute').value);
+            const description = document.getElementById('taskDescription').value;
+            
+            // Validate required fields
+            if (!namespace || !operation || !costCenter) {
+                alert('Por favor completa todos los campos requeridos');
+                return;
+            }
+            
+            // Show loading state
+            const createButton = document.querySelector('#weeklyTaskModal .btn-primary');
+            const originalText = createButton.innerHTML;
+            createButton.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Creando...';
+            createButton.disabled = true;
+            
+            // Create task via API
+            const response = await fetch('/api/weekly-schedule/create-task', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    namespace: namespace,
+                    day_of_week: dayIndex,
+                    hour: hour,
+                    minute: minute,
+                    operation_type: operation,
+                    cost_center: costCenter,
+                    description: description,
+                    user_id: 'weekly-view-user',
+                    requested_by: 'weekly-view-user'
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (response.ok && result.success) {
+                // Success - close modal and refresh data
+                const modal = bootstrap.Modal.getInstance(document.getElementById('weeklyTaskModal'));
+                modal.hide();
+                
+                // Show success notification
+                if (typeof showNotification === 'function') {
+                    showNotification('Tarea creada exitosamente', 'success');
+                }
+                
+                // Refresh weekly data
+                await this.refreshData();
+                
+            } else {
+                // Error
+                alert(`Error creando tarea: ${result.error || 'Error desconocido'}`);
+                
+                // Restore button state
+                createButton.innerHTML = originalText;
+                createButton.disabled = false;
+            }
+            
+        } catch (error) {
+            console.error('Error creating task from modal:', error);
+            alert(`Error creando tarea: ${error.message}`);
+            
+            // Restore button state
+            const createButton = document.querySelector('#weeklyTaskModal .btn-primary');
+            if (createButton) {
+                createButton.innerHTML = '<i class="fas fa-save"></i> Crear Tarea';
+                createButton.disabled = false;
+            }
+        }
+    }
+
+    /**
+     * Show existing tasks in a time slot
+     */
+    showTasksInSlot(dayIndex, hour, tasks) {
+        console.log(`Showing ${tasks.length} tasks for ${this.dayDisplayNames[dayIndex]} ${hour}:00`, tasks);
+        
+        // Could implement a modal to show/edit existing tasks
+        // For now, just log the information
+        if (tasks.length === 1) {
+            // Single task - could open edit modal
+            console.log('Single task clicked - could open edit modal');
+        } else {
+            // Multiple tasks - could show list modal
+            console.log('Multiple tasks clicked - could show list modal');
         }
     }
 

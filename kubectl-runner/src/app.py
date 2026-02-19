@@ -693,6 +693,13 @@ class TaskScheduler:
         self.weekly_cache_ttl = int(os.getenv('WEEKLY_CACHE_TTL', '300'))  # Default 5 minutes
         self.weekly_cache_enabled = os.getenv('WEEKLY_CACHE_ENABLED', 'true').lower() == 'true'
         
+        # Protected namespaces configuration
+        self.protected_namespaces = self.load_protected_namespaces()
+        
+        # Default namespace management
+        self.default_validation_enabled = os.getenv('DEFAULT_VALIDATION_ENABLED', 'true').lower() == 'true'
+        self.default_validation_interval = int(os.getenv('DEFAULT_VALIDATION_INTERVAL', '900'))  # 15 minutes default
+        
         # Persistence configuration
         self.auto_save_enabled = os.getenv('AUTO_SAVE_ENABLED', 'true').lower() == 'true'
         self.auto_save_interval = int(os.getenv('AUTO_SAVE_INTERVAL_SECONDS', '300'))  # 5 minutes default
@@ -707,6 +714,157 @@ class TaskScheduler:
         logger.info(f"TaskScheduler initialized with {self.max_workers} workers, "
                    f"{self.task_timeout}s timeout, {self.max_retries} max retries, "
                    f"auto-save: {self.auto_save_enabled}")
+
+    def load_protected_namespaces(self):
+        """Load protected namespaces from configuration file"""
+        try:
+            config_path = '/app/config/protected-namespaces.json'
+            
+            if os.path.exists(config_path):
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+                    protected_list = config.get('protected_namespaces', [])
+                    logger.info(f"Loaded {len(protected_list)} protected namespaces from config")
+                    return set(protected_list)
+            else:
+                # Default protected namespaces if config file doesn't exist
+                default_protected = {
+                    'kube-system', 'kube-public', 'kube-node-lease', 'default',
+                    'karpenter', 'kyverno', 'argocd', 'istio-system', 
+                    'monitoring', 'task-scheduler', 'cert-manager', 'ingress-nginx',
+                    'amazon-cloudwatch', 'calico-system', 'tigera-operator'
+                }
+                logger.warning(f"Protected namespaces config not found, using defaults: {len(default_protected)} namespaces")
+                return default_protected
+                
+        except Exception as e:
+            logger.error(f"Error loading protected namespaces config: {e}")
+            # Return minimal default set
+            return {'kube-system', 'kube-public', 'kube-node-lease', 'default', 'task-scheduler'}
+
+    def is_protected_namespace(self, namespace_name):
+        """Check if a namespace is protected (never gets turned off)"""
+        return namespace_name in self.protected_namespaces
+
+    def get_schedulable_namespaces(self):
+        """Get list of namespaces that can be scheduled (non-protected)"""
+        try:
+            result = self.execute_kubectl_command('get namespaces -o json')
+            if not result['success']:
+                logger.error(f"Failed to get namespaces: {result['stderr']}")
+                return []
+            
+            namespaces_data = json.loads(result['stdout'])
+            schedulable_namespaces = []
+            
+            for item in namespaces_data['items']:
+                namespace_name = item['metadata']['name']
+                
+                # Skip protected namespaces
+                if not self.is_protected_namespace(namespace_name):
+                    schedulable_namespaces.append(namespace_name)
+            
+            logger.debug(f"Found {len(schedulable_namespaces)} schedulable namespaces")
+            return schedulable_namespaces
+            
+        except Exception as e:
+            logger.error(f"Error getting schedulable namespaces: {e}")
+            return []
+
+    def ensure_default_namespace_state(self):
+        """Ensure default state: protected namespaces ON, others OFF"""
+        try:
+            logger.info("Starting default namespace state validation")
+            
+            # Get all namespaces
+            result = self.execute_kubectl_command('get namespaces -o json')
+            if not result['success']:
+                logger.error(f"Failed to get namespaces for default state validation: {result['stderr']}")
+                return False
+            
+            namespaces_data = json.loads(result['stdout'])
+            actions_taken = []
+            
+            for item in namespaces_data['items']:
+                namespace_name = item['metadata']['name']
+                
+                if self.is_protected_namespace(namespace_name):
+                    # Protected namespaces should always be active
+                    if not self.is_namespace_active(namespace_name):
+                        logger.info(f"Activating protected namespace: {namespace_name}")
+                        result = self.scale_namespace_resources(namespace_name, 1, enable_rollback=False)
+                        if result.get('success'):
+                            actions_taken.append(f"Activated protected namespace: {namespace_name}")
+                        else:
+                            logger.error(f"Failed to activate protected namespace {namespace_name}: {result.get('error')}")
+                else:
+                    # Non-protected namespaces should be inactive by default
+                    # Only turn off if they don't have active scheduled tasks
+                    if self.is_namespace_active(namespace_name) and not self.has_active_scheduled_tasks(namespace_name):
+                        logger.info(f"Deactivating unscheduled namespace: {namespace_name}")
+                        result = self.scale_namespace_resources(namespace_name, 0, enable_rollback=False)
+                        if result.get('success'):
+                            actions_taken.append(f"Deactivated unscheduled namespace: {namespace_name}")
+                        else:
+                            logger.error(f"Failed to deactivate namespace {namespace_name}: {result.get('error')}")
+            
+            if actions_taken:
+                logger.info(f"Default state validation completed. Actions taken: {len(actions_taken)}")
+                for action in actions_taken:
+                    logger.info(f"  - {action}")
+            else:
+                logger.debug("Default state validation completed. No actions needed.")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error ensuring default namespace state: {e}")
+            return False
+
+    def has_active_scheduled_tasks(self, namespace_name):
+        """Check if a namespace has active scheduled tasks that should keep it running"""
+        try:
+            current_time = datetime.now()
+            
+            for task_id, task in self.tasks.items():
+                if (task.get('namespace') == namespace_name and 
+                    task.get('status') in ['pending', 'running'] and
+                    task.get('schedule')):
+                    
+                    # Check if this task should be running now
+                    if self.should_task_be_running_now(task, current_time):
+                        return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error checking active scheduled tasks for {namespace_name}: {e}")
+            return False
+
+    def should_task_be_running_now(self, task, current_time):
+        """Check if a task should be running at the current time"""
+        try:
+            schedule = task.get('schedule')
+            if not schedule:
+                return False
+            
+            # Use croniter to check if we're in an active period
+            # This is a simplified check - you might want to make it more sophisticated
+            cron = croniter(schedule, current_time)
+            
+            # Check if the last occurrence was recent (within the last hour)
+            last_occurrence = cron.get_prev(datetime)
+            time_since_last = (current_time - last_occurrence).total_seconds()
+            
+            # If the task is an activation task and it ran recently, namespace should be active
+            if task.get('operation_type') == 'activate' and time_since_last < 3600:  # 1 hour
+                return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error checking if task should be running: {e}")
+            return False
 
     def get_active_namespaces_count(self):
         """Get the actual count of active namespaces by querying Kubernetes"""
@@ -2576,9 +2734,11 @@ class TaskScheduler:
         }
 
     def start_scheduler(self):
-        """Start the task scheduler with periodic cleanup"""
+        """Start the task scheduler with periodic cleanup and default state validation"""
         def scheduler_loop():
             cleanup_counter = 0
+            default_validation_counter = 0
+            
             while True:
                 try:
                     now = datetime.now()
@@ -2601,6 +2761,13 @@ class TaskScheduler:
                             logger.info(f"Periodic cleanup: removed {cleaned} completed task futures")
                         cleanup_counter = 0
                     
+                    # Default namespace state validation (every 15 minutes)
+                    default_validation_counter += 1
+                    if default_validation_counter >= 15 and self.default_validation_enabled:
+                        logger.info("Starting periodic default namespace state validation")
+                        self.ensure_default_namespace_state()
+                        default_validation_counter = 0
+                    
                     time.sleep(60)  # Check every minute
                     
                 except Exception as e:
@@ -2610,7 +2777,7 @@ class TaskScheduler:
 
         scheduler_thread = threading.Thread(target=scheduler_loop, daemon=True)
         scheduler_thread.start()
-        logger.info("Task scheduler started with periodic cleanup")
+        logger.info("Task scheduler started with periodic cleanup and default state validation")
 
     def get_weekly_scheduled_tasks(self, week_start_date):
         """
@@ -2638,6 +2805,11 @@ class TaskScheduler:
                 
                 # Skip non-pending tasks for future scheduling
                 if task.get('status') not in ['pending', 'running']:
+                    continue
+                
+                # Skip tasks for protected namespaces (they don't appear in weekly view)
+                namespace = task.get('namespace', '')
+                if self.is_protected_namespace(namespace):
                     continue
                 
                 try:
@@ -3343,6 +3515,35 @@ def get_namespaces():
         logger.error(f"Error getting namespaces: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/namespaces/schedulable', methods=['GET'])
+def get_schedulable_namespaces():
+    """Get namespaces that can be scheduled (non-protected)"""
+    try:
+        schedulable_namespaces = scheduler.get_schedulable_namespaces()
+        
+        # Add additional metadata for each namespace
+        namespace_details = []
+        for namespace in schedulable_namespaces:
+            details = scheduler.get_namespace_details(namespace)
+            namespace_details.append({
+                'name': namespace,
+                'is_active': details.get('is_active', False),
+                'active_pods': details.get('active_pods', 0),
+                'deployments': len(details.get('deployments', [])),
+                'statefulsets': len(details.get('statefulsets', [])),
+                'is_protected': False  # These are all non-protected by definition
+            })
+        
+        return jsonify({
+            'schedulable_namespaces': namespace_details,
+            'total_count': len(namespace_details),
+            'protected_count': len(scheduler.protected_namespaces)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting schedulable namespaces: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/namespaces/<namespace>/activate', methods=['POST'])
 def activate_namespace(namespace):
     """Activate a namespace"""
@@ -3971,6 +4172,99 @@ def create_batch_tasks_internal(data):
         'created_tasks': created_tasks,
         'failed_tasks': failed_tasks if failed_tasks else None
     })
+
+@app.route('/api/weekly-schedule/create-task', methods=['POST'])
+def create_weekly_schedule_task():
+    """
+    Create a task from the weekly schedule view
+    Simplified task creation for click-to-schedule functionality
+    """
+    try:
+        data = request.get_json()
+        
+        # Required fields
+        required_fields = ['namespace', 'day_of_week', 'hour', 'operation_type', 'cost_center']
+        missing_fields = [field for field in required_fields if field not in data]
+        
+        if missing_fields:
+            return jsonify({
+                'error': f'Missing required fields: {", ".join(missing_fields)}'
+            }), 400
+        
+        # Validate operation type
+        if data['operation_type'] not in ['activate', 'deactivate']:
+            return jsonify({
+                'error': 'operation_type must be either "activate" or "deactivate"'
+            }), 400
+        
+        # Validate day of week (0=Monday, 6=Sunday)
+        day_of_week = data['day_of_week']
+        if not isinstance(day_of_week, int) or day_of_week < 0 or day_of_week > 6:
+            return jsonify({
+                'error': 'day_of_week must be an integer between 0 (Monday) and 6 (Sunday)'
+            }), 400
+        
+        # Validate hour
+        hour = data['hour']
+        if not isinstance(hour, int) or hour < 0 or hour > 23:
+            return jsonify({
+                'error': 'hour must be an integer between 0 and 23'
+            }), 400
+        
+        # Check if namespace is protected
+        namespace = data['namespace']
+        if scheduler.is_protected_namespace(namespace):
+            return jsonify({
+                'error': f'Cannot schedule protected namespace: {namespace}'
+            }), 400
+        
+        # Create cron expression for the specific day and hour
+        # Format: minute hour day month day_of_week
+        minute = data.get('minute', 0)  # Default to start of hour
+        
+        # Convert day_of_week (0=Monday) to cron format (1=Monday, 0=Sunday)
+        cron_day_of_week = day_of_week + 1 if day_of_week < 6 else 0
+        cron_expression = f"{minute} {hour} * * {cron_day_of_week}"
+        
+        # Generate task title
+        day_names = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
+        operation_text = 'Activar' if data['operation_type'] == 'activate' else 'Desactivar'
+        title = f"{operation_text} {namespace} - {day_names[day_of_week]} {hour:02d}:{minute:02d}"
+        
+        # Create task data
+        task_data = {
+            'title': title,
+            'description': data.get('description', f'Tarea creada desde vista semanal'),
+            'operation_type': data['operation_type'],
+            'namespace': namespace,
+            'schedule': cron_expression,
+            'cost_center': data['cost_center'],
+            'user_id': data.get('user_id', 'weekly-view-user'),
+            'requested_by': data.get('requested_by', 'weekly-view-user'),
+            'created_from': 'weekly_view'
+        }
+        
+        # Create the task
+        task = scheduler.add_task(task_data)
+        
+        # Invalidate weekly cache since we added a new task
+        scheduler.invalidate_weekly_cache()
+        
+        logger.info(f"Created weekly schedule task: {title}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Task created successfully',
+            'task': task,
+            'cron_expression': cron_expression
+        }), 201
+        
+    except ValueError as e:
+        logger.error(f"Validation error creating weekly schedule task: {e}")
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        logger.error(f"Error creating weekly schedule task: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/weekly-schedule/<week_start_date>', methods=['GET'])
 def get_weekly_schedule(week_start_date):
