@@ -3494,5 +3494,5 @@ def create_batch_tasks_internal(data):
 
 if __name__ == '__main__':
     # Start the Flask app
-    # Updated: 2026-02-18 - Force rebuild to include all latest endpoints
+    # Updated: 2026-02-18 - Force rebuild to include batch task creation endpoints
     app.run(host='0.0.0.0', port=8080, debug=True, use_reloader=False)
