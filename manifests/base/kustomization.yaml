@@ -9,6 +9,8 @@ resources:
 - task-scheduler-deployment.yaml
 - task-scheduler-service.yaml
 - business-hours-config.yaml
+- protected-namespaces-configmap.yaml
+- kyverno-namespace-scheduler-policies.yaml
 
 commonLabels:
   app.kubernetes.io/name: task-scheduler

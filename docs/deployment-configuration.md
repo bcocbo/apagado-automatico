@@ -79,6 +79,17 @@ The kubectl-runner service requires specific RBAC permissions to manage namespac
 - **Documentation**: See [kubernetes-rbac-configuration.md](kubernetes-rbac-configuration.md) for detailed RBAC setup
 - **Security**: Current configuration uses broad permissions and requires review (Task 1.4)
 
+### Kyverno Policy Enforcement
+The system uses Kyverno policies to automatically enforce namespace scheduling rules:
+- **Configuration**: `manifests/base/kyverno-namespace-scheduler-policies.yaml`
+- **Documentation**: See [kyverno-namespace-scheduler-policies.md](kyverno-namespace-scheduler-policies.md) for detailed policy configuration
+- **Features**:
+  - **Pod Blocking**: Automatically blocks pod creation in inactive namespaces
+  - **Auto-scaling**: Automatically scales deployments and statefulsets to 0 replicas when namespaces become inactive
+  - **Auto-restoration**: Automatically restores original replica counts when namespaces are reactivated
+  - **Protected Namespaces**: System namespaces are excluded from all policies
+- **Benefits**: Provides enforcement at the Kubernetes API level, ensuring rules are followed even if the backend is unavailable
+
 ### Rollback System
 The backend implements automatic rollback for scaling operations to ensure atomicity:
 - **Documentation**: See [rollback-implementation.md](rollback-implementation.md) for detailed rollback behavior

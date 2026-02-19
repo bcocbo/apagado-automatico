@@ -1,0 +1,199 @@
+---
+# Política para bloquear creación de pods en namespaces inactivos
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: namespace-scheduler-block-inactive-pods
+  annotations:
+    policies.kyverno.io/title: Block Pods in Inactive Namespaces
+    policies.kyverno.io/category: Namespace Scheduler
+    policies.kyverno.io/description: >-
+      Blocks pod creation in namespaces marked as inactive by the namespace scheduler.
+      Namespaces with label scheduler.pocarqnube.com/status=inactive will reject new pods.
+      Protected namespaces are automatically excluded using ConfigMap data.
+spec:
+  validationFailureAction: enforce
+  background: false
+  rules:
+  - name: block-pods-in-inactive-namespaces
+    match:
+      any:
+      - resources:
+          kinds:
+          - Pod
+    validate:
+      message: >-
+        Pod creation blocked: Namespace '{{ request.namespace }}' is currently inactive.
+        The namespace scheduler has marked this namespace as inactive during non-business hours.
+        Pods will be allowed again during business hours (8 AM - 6 PM UTC-5) or when scheduled tasks activate the namespace.
+      deny:
+        conditions:
+        all:
+        # Only apply to namespaces that are not in the protected list
+        - key: "{{ request.namespace }}"
+          operator: AnyNotIn
+          value: "{{ configmap('task-scheduler', 'protected-namespaces-config').'protected-namespaces-list.txt' | split('\n') }}"
+        # And the namespace is marked as inactive
+        - key: "{{ request.namespace | lookup('v1', 'Namespace', '', request.namespace).metadata.labels.\"scheduler.pocarqnube.com/status\" || 'active' }}"
+          operator: Equals
+          value: "inactive"
+
+---
+# Política para auto-escalar deployments y statefulsets en namespaces inactivos
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: namespace-scheduler-auto-scale-inactive
+  annotations:
+    policies.kyverno.io/title: Auto-scale Resources in Inactive Namespaces
+    policies.kyverno.io/category: Namespace Scheduler
+    policies.kyverno.io/description: >-
+      Automatically scales down deployments and statefulsets to 0 replicas when
+      a namespace is marked as inactive by the namespace scheduler.
+      Protected namespaces are automatically excluded using ConfigMap data.
+spec:
+  validationFailureAction: enforce
+  background: true
+  rules:
+  - name: force-zero-replicas-deployments
+    match:
+      any:
+      - resources:
+          kinds:
+          - Deployment
+    mutate:
+      patchStrategicMerge:
+        spec:
+          replicas: 0
+        metadata:
+          annotations:
+            scheduler.pocarqnube.com/original-replicas: "{{ request.object.spec.replicas }}"
+            scheduler.pocarqnube.com/scaled-by: "namespace-scheduler"
+            scheduler.pocarqnube.com/scaled-at: "{{ time_now_utc() }}"
+    preconditions:
+      all:
+      # Only apply to namespaces that are not in the protected list
+      - key: "{{ request.namespace }}"
+        operator: AnyNotIn
+        value: "{{ configmap('task-scheduler', 'protected-namespaces-config').'protected-namespaces-list.txt' | split('\n') }}"
+      # And the namespace is marked as inactive
+      - key: "{{ request.namespace | lookup('v1', 'Namespace', '', request.namespace).metadata.labels.\"scheduler.pocarqnube.com/status\" || 'active' }}"
+        operator: Equals
+        value: "inactive"
+      # And the deployment has more than 0 replicas
+      - key: "{{ request.object.spec.replicas }}"
+        operator: GreaterThan
+        value: 0
+
+  - name: force-zero-replicas-statefulsets
+    match:
+      any:
+      - resources:
+          kinds:
+          - StatefulSet
+    mutate:
+      patchStrategicMerge:
+        spec:
+          replicas: 0
+        metadata:
+          annotations:
+            scheduler.pocarqnube.com/original-replicas: "{{ request.object.spec.replicas }}"
+            scheduler.pocarqnube.com/scaled-by: "namespace-scheduler"
+            scheduler.pocarqnube.com/scaled-at: "{{ time_now_utc() }}"
+    preconditions:
+      all:
+      # Only apply to namespaces that are not in the protected list
+      - key: "{{ request.namespace }}"
+        operator: AnyNotIn
+        value: "{{ configmap('task-scheduler', 'protected-namespaces-config').'protected-namespaces-list.txt' | split('\n') }}"
+      # And the namespace is marked as inactive
+      - key: "{{ request.namespace | lookup('v1', 'Namespace', '', request.namespace).metadata.labels.\"scheduler.pocarqnube.com/status\" || 'active' }}"
+        operator: Equals
+        value: "inactive"
+      # And the statefulset has more than 0 replicas
+      - key: "{{ request.object.spec.replicas }}"
+        operator: GreaterThan
+        value: 0
+
+---
+# Política para restaurar réplicas cuando el namespace se activa
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: namespace-scheduler-restore-active
+  annotations:
+    policies.kyverno.io/title: Restore Resources in Active Namespaces
+    policies.kyverno.io/category: Namespace Scheduler
+    policies.kyverno.io/description: >-
+      Automatically restores deployments and statefulsets to their original replica count
+      when a namespace is marked as active by the namespace scheduler.
+      Protected namespaces are automatically excluded using ConfigMap data.
+spec:
+  validationFailureAction: enforce
+  background: true
+  rules:
+  - name: restore-replicas-deployments
+    match:
+      any:
+      - resources:
+          kinds:
+          - Deployment
+    mutate:
+      patchStrategicMerge:
+        spec:
+          replicas: "{{ request.object.metadata.annotations.\"scheduler.pocarqnube.com/original-replicas\" | to_number(@) }}"
+        metadata:
+          annotations:
+            scheduler.pocarqnube.com/restored-by: "namespace-scheduler"
+            scheduler.pocarqnube.com/restored-at: "{{ time_now_utc() }}"
+    preconditions:
+      all:
+      # Only apply to namespaces that are not in the protected list
+      - key: "{{ request.namespace }}"
+        operator: AnyNotIn
+        value: "{{ configmap('task-scheduler', 'protected-namespaces-config').'protected-namespaces-list.txt' | split('\n') }}"
+      # And the namespace is marked as active
+      - key: "{{ request.namespace | lookup('v1', 'Namespace', '', request.namespace).metadata.labels.\"scheduler.pocarqnube.com/status\" || 'active' }}"
+        operator: Equals
+        value: "active"
+      # And there's an original replica count stored
+      - key: "{{ request.object.metadata.annotations.\"scheduler.pocarqnube.com/original-replicas\" || '0' }}"
+        operator: GreaterThan
+        value: 0
+      # And the current replicas is 0
+      - key: "{{ request.object.spec.replicas }}"
+        operator: Equals
+        value: 0
+
+  - name: restore-replicas-statefulsets
+    match:
+      any:
+      - resources:
+          kinds:
+          - StatefulSet
+    mutate:
+      patchStrategicMerge:
+        spec:
+          replicas: "{{ request.object.metadata.annotations.\"scheduler.pocarqnube.com/original-replicas\" | to_number(@) }}"
+        metadata:
+          annotations:
+            scheduler.pocarqnube.com/restored-by: "namespace-scheduler"
+            scheduler.pocarqnube.com/restored-at: "{{ time_now_utc() }}"
+    preconditions:
+      all:
+      # Only apply to namespaces that are not in the protected list
+      - key: "{{ request.namespace }}"
+        operator: AnyNotIn
+        value: "{{ configmap('task-scheduler', 'protected-namespaces-config').'protected-namespaces-list.txt' | split('\n') }}"
+      # And the namespace is marked as active
+      - key: "{{ request.namespace | lookup('v1', 'Namespace', '', request.namespace).metadata.labels.\"scheduler.pocarqnube.com/status\" || 'active' }}"
+        operator: Equals
+        value: "active"
+      # And there's an original replica count stored
+      - key: "{{ request.object.metadata.annotations.\"scheduler.pocarqnube.com/original-replicas\" || '0' }}"
+        operator: GreaterThan
+        value: 0
+      # And the current replicas is 0
+      - key: "{{ request.object.spec.replicas }}"
+        operator: Equals
+        value: 0

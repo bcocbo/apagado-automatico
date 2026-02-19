@@ -1,0 +1,48 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: protected-namespaces-config
+  namespace: task-scheduler
+data:
+  # Protected namespaces that should never be managed by the scheduler
+  # These namespaces are always active and excluded from Kyverno policies
+  protected-namespaces.json: |
+    {
+      "protected_namespaces": [
+        "kube-system",
+        "kube-public", 
+        "kube-node-lease",
+        "default",
+        "karpenter",
+        "kyverno",
+        "argocd",
+        "istio-system",
+        "monitoring",
+        "task-scheduler",
+        "cert-manager",
+        "ingress-nginx",
+        "amazon-cloudwatch",
+        "calico-system",
+        "tigera-operator"
+      ],
+      "description": "Namespaces que nunca se apagan y no aparecen en la vista semanal de programación",
+      "last_updated": "2024-02-19T00:00:00Z"
+    }
+  
+  # List format for easier consumption by Kyverno policies
+  protected-namespaces-list.txt: |
+    kube-system
+    kube-public
+    kube-node-lease
+    default
+    karpenter
+    kyverno
+    argocd
+    istio-system
+    monitoring
+    task-scheduler
+    cert-manager
+    ingress-nginx
+    amazon-cloudwatch
+    calico-system
+    tigera-operator

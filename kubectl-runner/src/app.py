@@ -720,29 +720,43 @@ class TaskScheduler:
                    f"auto-save: {self.auto_save_enabled}")
 
     def load_protected_namespaces(self):
-        """Load protected namespaces from configuration file"""
+        """Load protected namespaces from ConfigMap (preferred) or configuration file (fallback)"""
         try:
+            # First, try to load from ConfigMap (Kubernetes-native approach)
+            result = self.execute_kubectl_command('get configmap protected-namespaces-config -n task-scheduler -o json')
+            
+            if result['success']:
+                configmap_data = json.loads(result['stdout'])
+                config_json = configmap_data.get('data', {}).get('protected-namespaces.json', '')
+                
+                if config_json:
+                    config = json.loads(config_json)
+                    protected_list = config.get('protected_namespaces', [])
+                    logger.info(f"Loaded {len(protected_list)} protected namespaces from ConfigMap")
+                    return set(protected_list)
+            
+            # Fallback to local file
             config_path = '/app/config/protected-namespaces.json'
             
             if os.path.exists(config_path):
                 with open(config_path, 'r') as f:
                     config = json.load(f)
                     protected_list = config.get('protected_namespaces', [])
-                    logger.info(f"Loaded {len(protected_list)} protected namespaces from config")
+                    logger.info(f"Loaded {len(protected_list)} protected namespaces from local config file")
                     return set(protected_list)
             else:
-                # Default protected namespaces if config file doesn't exist
+                # Default protected namespaces if neither ConfigMap nor config file exists
                 default_protected = {
                     'kube-system', 'kube-public', 'kube-node-lease', 'default',
                     'karpenter', 'kyverno', 'argocd', 'istio-system', 
                     'monitoring', 'task-scheduler', 'cert-manager', 'ingress-nginx',
                     'amazon-cloudwatch', 'calico-system', 'tigera-operator'
                 }
-                logger.warning(f"Protected namespaces config not found, using defaults: {len(default_protected)} namespaces")
+                logger.warning(f"Neither ConfigMap nor config file found, using defaults: {len(default_protected)} namespaces")
                 return default_protected
                 
         except Exception as e:
-            logger.error(f"Error loading protected namespaces config: {e}")
+            logger.error(f"Error loading protected namespaces: {e}")
             # Return minimal default set
             return {'kube-system', 'kube-public', 'kube-node-lease', 'default', 'task-scheduler'}
 
@@ -912,8 +926,198 @@ class TaskScheduler:
             logger.error(f"Error checking if task should be running: {e}")
             return False
 
+    def activate_namespace_with_kyverno(self, namespace, cost_center='default', user_id='system', requested_by=None):
+        """Activate a namespace using Kyverno labels instead of direct scaling"""
+        try:
+            # Set namespace label to active
+            result = self.execute_kubectl_command(
+                f'label namespace {namespace} scheduler.pocarqnube.com/status=active --overwrite'
+            )
+            
+            if not result['success']:
+                logger.error(f"Failed to label namespace {namespace} as active: {result['stderr']}")
+                return {
+                    'success': False,
+                    'error': f'Failed to activate namespace: {result["stderr"]}',
+                    'method': 'kyverno_label'
+                }
+            
+            # Log the activation
+            self.dynamodb_manager.log_namespace_activity(
+                namespace_name=namespace,
+                operation_type='kyverno_activation',
+                cost_center=cost_center,
+                requested_by=requested_by or user_id,
+                cluster_name=self.cluster_name
+            )
+            
+            logger.info(f"Activated namespace {namespace} using Kyverno label")
+            
+            return {
+                'success': True,
+                'message': f'Namespace {namespace} activated using Kyverno policies',
+                'method': 'kyverno_label',
+                'namespace': namespace,
+                'status': 'active'
+            }
+            
+        except Exception as e:
+            logger.error(f"Error activating namespace {namespace} with Kyverno: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'method': 'kyverno_label'
+            }
+
+    def deactivate_namespace_with_kyverno(self, namespace, cost_center='default', user_id='system', requested_by=None):
+        """Deactivate a namespace using Kyverno labels instead of direct scaling"""
+        try:
+            # Set namespace label to inactive
+            result = self.execute_kubectl_command(
+                f'label namespace {namespace} scheduler.pocarqnube.com/status=inactive --overwrite'
+            )
+            
+            if not result['success']:
+                logger.error(f"Failed to label namespace {namespace} as inactive: {result['stderr']}")
+                return {
+                    'success': False,
+                    'error': f'Failed to deactivate namespace: {result["stderr"]}',
+                    'method': 'kyverno_label'
+                }
+            
+            # Log the deactivation
+            self.dynamodb_manager.log_namespace_activity(
+                namespace_name=namespace,
+                operation_type='kyverno_deactivation',
+                cost_center=cost_center,
+                requested_by=requested_by or user_id,
+                cluster_name=self.cluster_name
+            )
+            
+            logger.info(f"Deactivated namespace {namespace} using Kyverno label")
+            
+            return {
+                'success': True,
+                'message': f'Namespace {namespace} deactivated using Kyverno policies',
+                'method': 'kyverno_label',
+                'namespace': namespace,
+                'status': 'inactive'
+            }
+            
+        except Exception as e:
+            logger.error(f"Error deactivating namespace {namespace} with Kyverno: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'method': 'kyverno_label'
+            }
+
+    def get_namespace_status_kyverno(self, namespace):
+        """Get namespace status from Kyverno label"""
+        try:
+            result = self.execute_kubectl_command(f'get namespace {namespace} -o json')
+            
+            if not result['success']:
+                logger.error(f"Failed to get namespace {namespace}: {result['stderr']}")
+                return 'unknown'
+            
+            namespace_data = json.loads(result['stdout'])
+            labels = namespace_data.get('metadata', {}).get('labels', {})
+            status = labels.get('scheduler.pocarqnube.com/status', 'active')  # Default to active
+            
+            return status
+            
+        except Exception as e:
+            logger.error(f"Error getting namespace status for {namespace}: {e}")
+            return 'unknown'
+
+    def is_namespace_active_kyverno(self, namespace):
+        """Check if namespace is active using Kyverno label"""
+        status = self.get_namespace_status_kyverno(namespace)
+        return status == 'active'
+
+    def ensure_default_namespace_state_kyverno(self):
+        """Ensure default state using Kyverno labels: protected namespaces ON, others based on business hours"""
+        try:
+            logger.info("Starting default namespace state validation with Kyverno")
+            
+            # Check if we're in business hours
+            is_business_hours = not self.is_non_business_hours()
+            
+            # Get all namespaces
+            result = self.execute_kubectl_command('get namespaces -o json')
+            if not result['success']:
+                logger.error(f"Failed to get namespaces for default state validation: {result['stderr']}")
+                return False
+            
+            namespaces_data = json.loads(result['stdout'])
+            actions_taken = []
+            
+            for item in namespaces_data['items']:
+                namespace_name = item['metadata']['name']
+                
+                if self.is_protected_namespace(namespace_name):
+                    # Protected namespaces should always be active
+                    current_status = self.get_namespace_status_kyverno(namespace_name)
+                    if current_status != 'active':
+                        logger.info(f"Activating protected namespace with Kyverno: {namespace_name}")
+                        result = self.activate_namespace_with_kyverno(
+                            namespace_name, 
+                            cost_center='system',
+                            requested_by='system'
+                        )
+                        if result.get('success'):
+                            actions_taken.append(f"Activated protected namespace (Kyverno): {namespace_name}")
+                        else:
+                            logger.error(f"Failed to activate protected namespace {namespace_name}: {result.get('error')}")
+                else:
+                    # Non-protected namespaces: active during business hours, inactive otherwise
+                    current_status = self.get_namespace_status_kyverno(namespace_name)
+                    has_scheduled_tasks = self.has_active_scheduled_tasks(namespace_name)
+                    
+                    if is_business_hours:
+                        # During business hours: activate all non-protected namespaces
+                        if current_status != 'active':
+                            logger.info(f"Activating namespace for business hours with Kyverno: {namespace_name}")
+                            result = self.activate_namespace_with_kyverno(
+                                namespace_name,
+                                cost_center='system',
+                                requested_by='system'
+                            )
+                            if result.get('success'):
+                                actions_taken.append(f"Activated namespace for business hours (Kyverno): {namespace_name}")
+                            else:
+                                logger.error(f"Failed to activate namespace {namespace_name} for business hours: {result.get('error')}")
+                    else:
+                        # Outside business hours: deactivate unless they have active scheduled tasks
+                        if current_status == 'active' and not has_scheduled_tasks:
+                            logger.info(f"Deactivating namespace outside business hours with Kyverno: {namespace_name}")
+                            result = self.deactivate_namespace_with_kyverno(
+                                namespace_name,
+                                cost_center='system',
+                                requested_by='system'
+                            )
+                            if result.get('success'):
+                                actions_taken.append(f"Deactivated namespace outside business hours (Kyverno): {namespace_name}")
+                            else:
+                                logger.error(f"Failed to deactivate namespace {namespace_name} outside business hours: {result.get('error')}")
+            
+            if actions_taken:
+                business_status = "business hours" if is_business_hours else "non-business hours"
+                logger.info(f"Default state validation with Kyverno completed during {business_status}. Actions taken: {len(actions_taken)}")
+                for action in actions_taken:
+                    logger.info(f"  - {action}")
+            else:
+                business_status = "business hours" if is_business_hours else "non-business hours"
+                logger.debug(f"Default state validation with Kyverno completed during {business_status}. No actions needed.")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error ensuring default namespace state with Kyverno: {e}")
+            return False
+
     def get_active_namespaces_count(self):
-        """Get the actual count of active namespaces by querying Kubernetes"""
         try:
             # Get all namespaces
             result = self.execute_kubectl_command('get namespaces -o json')
@@ -3303,7 +3507,8 @@ def test_business_hours_validation():
             'success': True,
             'validation_completed': result,
             'message': 'Business hours validation completed successfully' if result else 'Validation failed',
-            'timestamp': datetime.now().isoformat()
+            'timestamp': datetime.now().isoformat(),
+            'method': 'traditional_scaling'
         })
     except Exception as e:
         logger.error(f"Error testing business hours validation: {e}")
@@ -3311,6 +3516,84 @@ def test_business_hours_validation():
             'success': False,
             'error': str(e)
         }), 500
+
+@app.route('/api/business-hours/test-validation-kyverno', methods=['POST'])
+def test_business_hours_validation_kyverno():
+    """Test the business hours validation logic using Kyverno (manual trigger)"""
+    try:
+        result = scheduler.ensure_default_namespace_state_kyverno()
+        
+        return jsonify({
+            'success': True,
+            'validation_completed': result,
+            'message': 'Business hours validation with Kyverno completed successfully' if result else 'Validation failed',
+            'timestamp': datetime.now().isoformat(),
+            'method': 'kyverno_labels'
+        })
+    except Exception as e:
+        logger.error(f"Error testing business hours validation with Kyverno: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/namespaces/<namespace>/activate-kyverno', methods=['POST'])
+def activate_namespace_kyverno(namespace):
+    """Activate a namespace using Kyverno labels"""
+    try:
+        # Check if namespace is protected
+        if scheduler.is_protected_namespace(namespace):
+            return jsonify({
+                'success': False,
+                'error': f'Namespace "{namespace}" is protected and cannot be activated/deactivated',
+                'protected': True,
+                'reason': 'This namespace is critical for cluster operations'
+            }), 403
+        
+        data = request.get_json() or {}
+        cost_center = data.get('cost_center', 'default')
+        user_id = data.get('user_id', 'anonymous')
+        requested_by = data.get('requested_by', user_id)
+        
+        result = scheduler.activate_namespace_with_kyverno(namespace, cost_center, user_id, requested_by)
+        
+        if result['success']:
+            return jsonify(result), 200
+        else:
+            return jsonify(result), 400
+            
+    except Exception as e:
+        logger.error(f"Error activating namespace {namespace} with Kyverno: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/namespaces/<namespace>/deactivate-kyverno', methods=['POST'])
+def deactivate_namespace_kyverno(namespace):
+    """Deactivate a namespace using Kyverno labels"""
+    try:
+        # Check if namespace is protected
+        if scheduler.is_protected_namespace(namespace):
+            return jsonify({
+                'success': False,
+                'error': f'Namespace "{namespace}" is protected and cannot be activated/deactivated',
+                'protected': True,
+                'reason': 'This namespace is critical for cluster operations'
+            }), 403
+        
+        data = request.get_json() or {}
+        cost_center = data.get('cost_center', 'default')
+        user_id = data.get('user_id', 'anonymous')
+        requested_by = data.get('requested_by', user_id)
+        
+        result = scheduler.deactivate_namespace_with_kyverno(namespace, cost_center, user_id, requested_by)
+        
+        if result['success']:
+            return jsonify(result), 200
+        else:
+            return jsonify(result), 400
+            
+    except Exception as e:
+        logger.error(f"Error deactivating namespace {namespace} with Kyverno: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/tasks/running', methods=['GET'])
 def get_running_tasks():
