@@ -2079,6 +2079,8 @@ class TaskScheduler:
             'operation_type': task_data.get('operation_type', 'command'),  # 'command', 'activate', 'deactivate'
             'status': 'pending',
             'created_at': datetime.now().isoformat(),
+            'start': task_data.get('start') or datetime.now().isoformat(),  # Add start field for frontend calendar
+            'allDay': task_data.get('allDay', False),  # Add allDay field for frontend calendar
             'created_by': requested_by,  # Track who created the task
             'last_run': None,
             'next_run': self.calculate_next_run(task_data.get('schedule', '')),
