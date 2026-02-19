@@ -3313,6 +3313,25 @@ def invalidate_cache():
         logger.error(f"Error invalidating cache: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/tasks/cleanup-all', methods=['POST'])
+def cleanup_all_tasks():
+    """Clean up all tasks (for testing/reset purposes)"""
+    try:
+        task_count = len(scheduler.tasks)
+        scheduler.tasks.clear()
+        scheduler.save_tasks()
+        
+        logger.info(f"Cleaned up all {task_count} tasks")
+        
+        return jsonify({
+            'message': f'All {task_count} tasks have been cleaned up',
+            'cleaned_count': task_count
+        })
+        
+    except Exception as e:
+        logger.error(f"Error cleaning up all tasks: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/tasks/batch', methods=['POST'])
 def create_batch_tasks():
     """Create multiple tasks in batch"""
