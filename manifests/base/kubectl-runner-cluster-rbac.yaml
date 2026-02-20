@@ -116,7 +116,7 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: kubectl-runner-readonly
+  name: kubectl-runner-readonly-kube-system
   namespace: kube-system
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -131,7 +131,7 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: kubectl-runner-readonly
+  name: kubectl-runner-readonly-argocd
   namespace: argocd
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -146,7 +146,7 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: kubectl-runner-readonly
+  name: kubectl-runner-readonly-istio-system
   namespace: istio-system
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -161,7 +161,7 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: kubectl-runner-readonly
+  name: kubectl-runner-readonly-kyverno
   namespace: kyverno
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -176,7 +176,7 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: kubectl-runner-readonly
+  name: kubectl-runner-readonly-kube-public
   namespace: kube-public
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -191,7 +191,7 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: kubectl-runner-readonly
+  name: kubectl-runner-readonly-kube-node-lease
   namespace: kube-node-lease
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -206,7 +206,7 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: kubectl-runner-readonly
+  name: kubectl-runner-readonly-karpenter
   namespace: karpenter
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -221,7 +221,7 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: kubectl-runner-readonly
+  name: kubectl-runner-readonly-keda
   namespace: keda
 roleRef:
   apiGroup: rbac.authorization.k8s.io

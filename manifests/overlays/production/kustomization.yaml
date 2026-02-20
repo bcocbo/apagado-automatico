@@ -7,8 +7,8 @@ resources:
 - ingress.yaml
 
 # PATCHES QUE MODIFICAN LOS RECURSOS BASE
-patchesStrategicMerge:
-- task-scheduler-patch.yaml   #  MODIFICA EL DEPLOYMENT BASE
+patches:
+- path: task-scheduler-patch.yaml   #  MODIFICA EL DEPLOYMENT BASE
 
 # ESCALA LAS RÉPLICAS PARA PRODUCCIÓN
 replicas:

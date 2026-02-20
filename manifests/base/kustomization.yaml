@@ -13,7 +13,8 @@ resources:
 - protected-namespaces-configmap.yaml
 - kyverno-namespace-scheduler-policies.yaml
 
-commonLabels:
-  app.kubernetes.io/name: task-scheduler
-  app.kubernetes.io/instance: task-scheduler
-  app.kubernetes.io/managed-by: argocd
+labels:
+- pairs:
+    app.kubernetes.io/name: task-scheduler
+    app.kubernetes.io/instance: task-scheduler
+    app.kubernetes.io/managed-by: argocd
