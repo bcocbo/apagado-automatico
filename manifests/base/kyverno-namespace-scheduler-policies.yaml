@@ -21,6 +21,10 @@ spec:
       - resources:
           kinds:
           - Pod
+    exclude:
+      any:
+      - resources:
+          namespaces: "{{ configmap('task-scheduler', 'protected-namespaces-config').'protected-namespaces-list.txt' | split('\n') }}"
     validate:
       message: >-
         Pod creation blocked: Namespace '{{ request.namespace }}' is currently inactive.
@@ -28,12 +32,6 @@ spec:
         Pods will be allowed again during business hours (8 AM - 6 PM UTC-5) or when scheduled tasks activate the namespace.
       deny:
         conditions:
-        all:
-        # Only apply to namespaces that are not in the protected list
-        - key: "{{ request.namespace }}"
-          operator: AnyNotIn
-          value: "{{ configmap('task-scheduler', 'protected-namespaces-config').'protected-namespaces-list.txt' | split('\n') }}"
-        # And the namespace is marked as inactive
         - key: "{{ request.namespace | lookup('v1', 'Namespace', '', request.namespace).metadata.labels.\"scheduler.pocarqnube.com/status\" || 'active' }}"
           operator: Equals
           value: "inactive"
@@ -61,6 +59,10 @@ spec:
       - resources:
           kinds:
           - Deployment
+    exclude:
+      any:
+      - resources:
+          namespaces: "{{ configmap('task-scheduler', 'protected-namespaces-config').'protected-namespaces-list.txt' | split('\n') }}"
     mutate:
       patchStrategicMerge:
         spec:
@@ -72,10 +74,6 @@ spec:
             scheduler.pocarqnube.com/scaled-at: "{{ time_now_utc() }}"
     preconditions:
       all:
-      # Only apply to namespaces that are not in the protected list
-      - key: "{{ request.namespace }}"
-        operator: AnyNotIn
-        value: "{{ configmap('task-scheduler', 'protected-namespaces-config').'protected-namespaces-list.txt' | split('\n') }}"
       # And the namespace is marked as inactive
       - key: "{{ request.namespace | lookup('v1', 'Namespace', '', request.namespace).metadata.labels.\"scheduler.pocarqnube.com/status\" || 'active' }}"
         operator: Equals
