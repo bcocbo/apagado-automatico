@@ -927,9 +927,9 @@ class TaskScheduler:
             return False
 
     def activate_namespace_with_kyverno(self, namespace, cost_center='default', user_id='system', requested_by=None):
-        """Activate a namespace using Kyverno labels instead of direct scaling"""
+        """Activate a namespace using Kyverno labels (allows new pods to be created)"""
         try:
-            # Set namespace label to active
+            # Set namespace label to active (allows new pods via Kyverno)
             result = self.execute_kubectl_command(
                 f'label namespace {namespace} scheduler.pocarqnube.com/status=active --overwrite'
             )
@@ -951,11 +951,11 @@ class TaskScheduler:
                 cluster_name=self.cluster_name
             )
             
-            logger.info(f"Activated namespace {namespace} using Kyverno label")
+            logger.info(f"Activated namespace {namespace} using Kyverno label - new pods can now be created")
             
             return {
                 'success': True,
-                'message': f'Namespace {namespace} activated using Kyverno policies',
+                'message': f'Namespace {namespace} activated using Kyverno policies - new pods can now be created',
                 'method': 'kyverno_label',
                 'namespace': namespace,
                 'status': 'active'
@@ -970,9 +970,9 @@ class TaskScheduler:
             }
 
     def deactivate_namespace_with_kyverno(self, namespace, cost_center='default', user_id='system', requested_by=None):
-        """Deactivate a namespace using Kyverno labels instead of direct scaling"""
+        """Deactivate a namespace using Kyverno labels and delete existing pods"""
         try:
-            # Set namespace label to inactive
+            # Step 1: Set namespace label to inactive (blocks new pods via Kyverno)
             result = self.execute_kubectl_command(
                 f'label namespace {namespace} scheduler.pocarqnube.com/status=inactive --overwrite'
             )
@@ -982,26 +982,47 @@ class TaskScheduler:
                 return {
                     'success': False,
                     'error': f'Failed to deactivate namespace: {result["stderr"]}',
-                    'method': 'kyverno_label'
+                    'method': 'kyverno_label_and_delete'
                 }
+            
+            # Step 2: Delete existing pods to free resources immediately
+            pods_deleted = 0
+            pods_result = self.execute_kubectl_command(
+                f'get pods -n {namespace} --no-headers -o custom-columns=":metadata.name"'
+            )
+            
+            if pods_result['success'] and pods_result['stdout'].strip():
+                pod_names = [name.strip() for name in pods_result['stdout'].strip().split('\n') if name.strip()]
+                
+                for pod_name in pod_names:
+                    delete_result = self.execute_kubectl_command(
+                        f'delete pod {pod_name} -n {namespace} --grace-period=30'
+                    )
+                    if delete_result['success']:
+                        pods_deleted += 1
+                        logger.info(f"Deleted pod {pod_name} in namespace {namespace}")
+                    else:
+                        logger.warning(f"Failed to delete pod {pod_name} in namespace {namespace}: {delete_result['stderr']}")
             
             # Log the deactivation
             self.dynamodb_manager.log_namespace_activity(
                 namespace_name=namespace,
-                operation_type='kyverno_deactivation',
+                operation_type='kyverno_deactivation_with_cleanup',
                 cost_center=cost_center,
                 requested_by=requested_by or user_id,
-                cluster_name=self.cluster_name
+                cluster_name=self.cluster_name,
+                pods_deleted=pods_deleted
             )
             
-            logger.info(f"Deactivated namespace {namespace} using Kyverno label")
+            logger.info(f"Deactivated namespace {namespace} using Kyverno label and deleted {pods_deleted} pods")
             
             return {
                 'success': True,
-                'message': f'Namespace {namespace} deactivated using Kyverno policies',
-                'method': 'kyverno_label',
+                'message': f'Namespace {namespace} deactivated using Kyverno policies and {pods_deleted} pods deleted',
+                'method': 'kyverno_label_and_delete',
                 'namespace': namespace,
-                'status': 'inactive'
+                'status': 'inactive',
+                'pods_deleted': pods_deleted
             }
             
         except Exception as e:
@@ -1009,7 +1030,7 @@ class TaskScheduler:
             return {
                 'success': False,
                 'error': str(e),
-                'method': 'kyverno_label'
+                'method': 'kyverno_label_and_delete'
             }
 
     def get_namespace_status_kyverno(self, namespace):
@@ -1091,14 +1112,15 @@ class TaskScheduler:
                     else:
                         # Outside business hours: deactivate unless they have active scheduled tasks
                         if current_status == 'active' and not has_scheduled_tasks:
-                            logger.info(f"Deactivating namespace outside business hours with Kyverno: {namespace_name}")
+                            logger.info(f"Deactivating namespace outside business hours with Kyverno + pod cleanup: {namespace_name}")
                             result = self.deactivate_namespace_with_kyverno(
                                 namespace_name,
                                 cost_center='system',
                                 requested_by='system'
                             )
                             if result.get('success'):
-                                actions_taken.append(f"Deactivated namespace outside business hours (Kyverno): {namespace_name}")
+                                pods_deleted = result.get('pods_deleted', 0)
+                                actions_taken.append(f"Deactivated namespace outside business hours (Kyverno + {pods_deleted} pods deleted): {namespace_name}")
                             else:
                                 logger.error(f"Failed to deactivate namespace {namespace_name} outside business hours: {result.get('error')}")
             
