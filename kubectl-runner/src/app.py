@@ -927,9 +927,9 @@ class TaskScheduler:
             return False
 
     def activate_namespace_with_kyverno(self, namespace, cost_center='default', user_id='system', requested_by=None):
-        """Activate a namespace using Kyverno labels (allows new pods to be created)"""
+        """Activate a namespace using Kyverno labels and restore deployments that weren't managed by Kyverno"""
         try:
-            # Set namespace label to active (allows new pods via Kyverno)
+            # Step 1: Set namespace label to active (allows new pods via Kyverno)
             result = self.execute_kubectl_command(
                 f'label namespace {namespace} scheduler.pocarqnube.com/status=active --overwrite'
             )
@@ -939,26 +939,91 @@ class TaskScheduler:
                 return {
                     'success': False,
                     'error': f'Failed to activate namespace: {result["stderr"]}',
-                    'method': 'kyverno_label'
+                    'method': 'kyverno_label_with_restore'
                 }
+            
+            # Step 2: Restore deployments that don't have Kyverno annotations (weren't managed by Kyverno)
+            deployments_restored = 0
+            
+            # Get deployments with 0 replicas that don't have Kyverno original-replicas annotation
+            deployments_result = self.execute_kubectl_command(
+                f'get deployments -n {namespace} -o json'
+            )
+            
+            if deployments_result['success']:
+                deployments_data = json.loads(deployments_result['stdout'])
+                
+                for deployment in deployments_data.get('items', []):
+                    deployment_name = deployment['metadata']['name']
+                    current_replicas = deployment.get('spec', {}).get('replicas', 0)
+                    annotations = deployment.get('metadata', {}).get('annotations', {})
+                    original_replicas_annotation = annotations.get('scheduler.pocarqnube.com/original-replicas')
+                    
+                    # If deployment has 0 replicas and no Kyverno annotation, restore to 1 replica
+                    if current_replicas == 0 and not original_replicas_annotation:
+                        logger.info(f"Restoring deployment {deployment_name} in namespace {namespace} (not managed by Kyverno)")
+                        
+                        scale_result = self.execute_kubectl_command(
+                            f'scale deployment {deployment_name} -n {namespace} --replicas=1'
+                        )
+                        
+                        if scale_result['success']:
+                            deployments_restored += 1
+                            logger.info(f"Restored deployment {deployment_name} to 1 replica")
+                        else:
+                            logger.warning(f"Failed to restore deployment {deployment_name}: {scale_result['stderr']}")
+            
+            # Step 3: Do the same for StatefulSets
+            statefulsets_restored = 0
+            statefulsets_result = self.execute_kubectl_command(
+                f'get statefulsets -n {namespace} -o json'
+            )
+            
+            if statefulsets_result['success']:
+                statefulsets_data = json.loads(statefulsets_result['stdout'])
+                
+                for statefulset in statefulsets_data.get('items', []):
+                    statefulset_name = statefulset['metadata']['name']
+                    current_replicas = statefulset.get('spec', {}).get('replicas', 0)
+                    annotations = statefulset.get('metadata', {}).get('annotations', {})
+                    original_replicas_annotation = annotations.get('scheduler.pocarqnube.com/original-replicas')
+                    
+                    # If statefulset has 0 replicas and no Kyverno annotation, restore to 1 replica
+                    if current_replicas == 0 and not original_replicas_annotation:
+                        logger.info(f"Restoring statefulset {statefulset_name} in namespace {namespace} (not managed by Kyverno)")
+                        
+                        scale_result = self.execute_kubectl_command(
+                            f'scale statefulset {statefulset_name} -n {namespace} --replicas=1'
+                        )
+                        
+                        if scale_result['success']:
+                            statefulsets_restored += 1
+                            logger.info(f"Restored statefulset {statefulset_name} to 1 replica")
+                        else:
+                            logger.warning(f"Failed to restore statefulset {statefulset_name}: {scale_result['stderr']}")
             
             # Log the activation
             self.dynamodb_manager.log_namespace_activity(
                 namespace_name=namespace,
-                operation_type='kyverno_activation',
+                operation_type='kyverno_activation_with_restore',
                 cost_center=cost_center,
                 requested_by=requested_by or user_id,
-                cluster_name=self.cluster_name
+                cluster_name=self.cluster_name,
+                deployments_restored=deployments_restored,
+                statefulsets_restored=statefulsets_restored
             )
             
-            logger.info(f"Activated namespace {namespace} using Kyverno label - new pods can now be created")
+            total_restored = deployments_restored + statefulsets_restored
+            logger.info(f"Activated namespace {namespace} using Kyverno label and restored {total_restored} resources")
             
             return {
                 'success': True,
-                'message': f'Namespace {namespace} activated using Kyverno policies - new pods can now be created',
-                'method': 'kyverno_label',
+                'message': f'Namespace {namespace} activated using Kyverno policies and {total_restored} resources restored',
+                'method': 'kyverno_label_with_restore',
                 'namespace': namespace,
-                'status': 'active'
+                'status': 'active',
+                'deployments_restored': deployments_restored,
+                'statefulsets_restored': statefulsets_restored
             }
             
         except Exception as e:
@@ -966,7 +1031,7 @@ class TaskScheduler:
             return {
                 'success': False,
                 'error': str(e),
-                'method': 'kyverno_label'
+                'method': 'kyverno_label_with_restore'
             }
 
     def deactivate_namespace_with_kyverno(self, namespace, cost_center='default', user_id='system', requested_by=None):
