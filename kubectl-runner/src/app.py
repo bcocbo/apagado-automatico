@@ -713,7 +713,7 @@ class TaskScheduler:
         
         # Run initial default state validation in background (non-blocking)
         if self.default_validation_enabled:
-            threading.Thread(target=self.ensure_default_namespace_state, daemon=True).start()
+            threading.Thread(target=self.ensure_default_namespace_state_kyverno, daemon=True).start()
         
         logger.info(f"TaskScheduler initialized with {self.max_workers} workers, "
                    f"{self.task_timeout}s timeout, {self.max_retries} max retries, "
@@ -3014,8 +3014,8 @@ class TaskScheduler:
                     # Default namespace state validation (every 15 minutes)
                     default_validation_counter += 1
                     if default_validation_counter >= 15 and self.default_validation_enabled:
-                        logger.info("Starting periodic default namespace state validation")
-                        self.ensure_default_namespace_state()
+                        logger.info("Starting periodic default namespace state validation with Kyverno")
+                        self.ensure_default_namespace_state_kyverno()
                         default_validation_counter = 0
                     
                     time.sleep(60)  # Check every minute
@@ -3501,7 +3501,7 @@ def get_business_hours_status():
 def test_business_hours_validation():
     """Test the business hours validation logic (manual trigger)"""
     try:
-        result = scheduler.ensure_default_namespace_state()
+        result = scheduler.ensure_default_namespace_state_kyverno()
         
         return jsonify({
             'success': True,
@@ -3895,8 +3895,8 @@ def get_schedulable_namespaces():
         # This makes the endpoint much faster
         namespace_details = []
         for namespace in schedulable_namespaces:
-            # Only get basic active status, skip detailed resource queries
-            is_active = scheduler.is_namespace_active(namespace)
+            # Only get basic active status using Kyverno labels
+            is_active = scheduler.is_namespace_active_kyverno(namespace)
             namespace_details.append({
                 'name': namespace,
                 'is_active': is_active,
