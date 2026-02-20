@@ -24,7 +24,22 @@ spec:
     exclude:
       any:
       - resources:
-          namespaces: "{{ configmap('task-scheduler', 'protected-namespaces-config').'protected-namespaces-list.txt' | split('\n') }}"
+          namespaces:
+          - kube-system
+          - kube-public
+          - kube-node-lease
+          - default
+          - karpenter
+          - kyverno
+          - argocd
+          - istio-system
+          - monitoring
+          - task-scheduler
+          - cert-manager
+          - ingress-nginx
+          - amazon-cloudwatch
+          - calico-system
+          - tigera-operator
     validate:
       message: >-
         Pod creation blocked: Namespace '{{ request.namespace }}' is currently inactive.
@@ -62,7 +77,22 @@ spec:
     exclude:
       any:
       - resources:
-          namespaces: "{{ configmap('task-scheduler', 'protected-namespaces-config').'protected-namespaces-list.txt' | split('\n') }}"
+          namespaces:
+          - kube-system
+          - kube-public
+          - kube-node-lease
+          - default
+          - karpenter
+          - kyverno
+          - argocd
+          - istio-system
+          - monitoring
+          - task-scheduler
+          - cert-manager
+          - ingress-nginx
+          - amazon-cloudwatch
+          - calico-system
+          - tigera-operator
     mutate:
       patchStrategicMerge:
         spec:
@@ -89,6 +119,25 @@ spec:
       - resources:
           kinds:
           - StatefulSet
+    exclude:
+      any:
+      - resources:
+          namespaces:
+          - kube-system
+          - kube-public
+          - kube-node-lease
+          - default
+          - karpenter
+          - kyverno
+          - argocd
+          - istio-system
+          - monitoring
+          - task-scheduler
+          - cert-manager
+          - ingress-nginx
+          - amazon-cloudwatch
+          - calico-system
+          - tigera-operator
     mutate:
       patchStrategicMerge:
         spec:
@@ -100,10 +149,6 @@ spec:
             scheduler.pocarqnube.com/scaled-at: "{{ time_now_utc() }}"
     preconditions:
       all:
-      # Only apply to namespaces that are not in the protected list
-      - key: "{{ request.namespace }}"
-        operator: AnyNotIn
-        value: "{{ configmap('task-scheduler', 'protected-namespaces-config').'protected-namespaces-list.txt' | split('\n') }}"
       # And the namespace is marked as inactive
       - key: "{{ request.namespace | lookup('v1', 'Namespace', '', request.namespace).metadata.labels.\"scheduler.pocarqnube.com/status\" || 'active' }}"
         operator: Equals
@@ -136,6 +181,25 @@ spec:
       - resources:
           kinds:
           - Deployment
+    exclude:
+      any:
+      - resources:
+          namespaces:
+          - kube-system
+          - kube-public
+          - kube-node-lease
+          - default
+          - karpenter
+          - kyverno
+          - argocd
+          - istio-system
+          - monitoring
+          - task-scheduler
+          - cert-manager
+          - ingress-nginx
+          - amazon-cloudwatch
+          - calico-system
+          - tigera-operator
     mutate:
       patchStrategicMerge:
         spec:
@@ -146,10 +210,6 @@ spec:
             scheduler.pocarqnube.com/restored-at: "{{ time_now_utc() }}"
     preconditions:
       all:
-      # Only apply to namespaces that are not in the protected list
-      - key: "{{ request.namespace }}"
-        operator: AnyNotIn
-        value: "{{ configmap('task-scheduler', 'protected-namespaces-config').'protected-namespaces-list.txt' | split('\n') }}"
       # And the namespace is marked as active
       - key: "{{ request.namespace | lookup('v1', 'Namespace', '', request.namespace).metadata.labels.\"scheduler.pocarqnube.com/status\" || 'active' }}"
         operator: Equals
@@ -169,6 +229,25 @@ spec:
       - resources:
           kinds:
           - StatefulSet
+    exclude:
+      any:
+      - resources:
+          namespaces:
+          - kube-system
+          - kube-public
+          - kube-node-lease
+          - default
+          - karpenter
+          - kyverno
+          - argocd
+          - istio-system
+          - monitoring
+          - task-scheduler
+          - cert-manager
+          - ingress-nginx
+          - amazon-cloudwatch
+          - calico-system
+          - tigera-operator
     mutate:
       patchStrategicMerge:
         spec:
@@ -179,10 +258,6 @@ spec:
             scheduler.pocarqnube.com/restored-at: "{{ time_now_utc() }}"
     preconditions:
       all:
-      # Only apply to namespaces that are not in the protected list
-      - key: "{{ request.namespace }}"
-        operator: AnyNotIn
-        value: "{{ configmap('task-scheduler', 'protected-namespaces-config').'protected-namespaces-list.txt' | split('\n') }}"
       # And the namespace is marked as active
       - key: "{{ request.namespace | lookup('v1', 'Namespace', '', request.namespace).metadata.labels.\"scheduler.pocarqnube.com/status\" || 'active' }}"
         operator: Equals
