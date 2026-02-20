@@ -12,6 +12,7 @@ resources:
 - business-hours-config.yaml
 - protected-namespaces-configmap.yaml
 - kyverno-namespace-scheduler-policies.yaml
+- kyverno-force-spot-nodepool.yaml
 
 labels:
 - pairs:

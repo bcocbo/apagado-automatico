@@ -1,0 +1,116 @@
+---
+# Política para forzar el uso del nodepool spot en namespaces no protegidos
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: force-spot-nodepool-non-protected
+  annotations:
+    policies.kyverno.io/title: Force Spot NodePool for Non-Protected Namespaces
+    policies.kyverno.io/category: Karpenter
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      This policy automatically adds nodeSelector to force pods in non-protected
+      namespaces to use the Karpenter spot nodepool. Protected namespaces
+      (system namespaces) are excluded and can use any nodepool.
+    pod-policies.kyverno.io/autogen-controllers: none
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+  - name: add-spot-nodepool-selector
+    match:
+      any:
+      - resources:
+          kinds:
+          - Pod
+    exclude:
+      any:
+      - resources:
+          namespaces:
+          # Protected namespaces from ConfigMap
+          - kube-system
+          - kube-public
+          - kube-node-lease
+          - default
+          - karpenter
+          - kyverno
+          - argocd
+          - istio-system
+          - monitoring
+          - task-scheduler
+          - cert-manager
+          - ingress-nginx
+          - amazon-cloudwatch
+          - calico-system
+          - tigera-operator
+    mutate:
+      patchStrategicMerge:
+        spec:
+          nodeSelector:
+            +(karpenter.sh/nodepool): spot
+          tolerations:
+          - +(key): karpenter.sh/nodepool
+            +(operator): Equal
+            +(value): spot
+            +(effect): NoSchedule
+
+---
+# Política para validar que pods en namespaces no protegidos usen spot
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: validate-spot-nodepool-usage
+  annotations:
+    policies.kyverno.io/title: Validate Spot NodePool Usage
+    policies.kyverno.io/category: Karpenter
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      This policy validates that pods in non-protected namespaces have the
+      correct nodeSelector for the spot nodepool. This is a validation policy
+      that works alongside the mutation policy.
+    pod-policies.kyverno.io/autogen-controllers: none
+spec:
+  validationFailureAction: Audit  # Use Audit mode to not block, just report
+  background: true
+  rules:
+  - name: check-spot-nodepool-selector
+    match:
+      any:
+      - resources:
+          kinds:
+          - Pod
+    exclude:
+      any:
+      - resources:
+          namespaces:
+          # Protected namespaces
+          - kube-system
+          - kube-public
+          - kube-node-lease
+          - default
+          - karpenter
+          - kyverno
+          - argocd
+          - istio-system
+          - monitoring
+          - task-scheduler
+          - cert-manager
+          - ingress-nginx
+          - amazon-cloudwatch
+          - calico-system
+          - tigera-operator
+      # Exclude DaemonSets as they need to run on all nodes
+      - resources:
+          selector:
+            matchLabels:
+              app.kubernetes.io/component: daemonset
+    validate:
+      message: >-
+        Pods in non-protected namespaces should use the spot nodepool.
+        Expected nodeSelector: karpenter.sh/nodepool=spot
+      pattern:
+        spec:
+          nodeSelector:
+            karpenter.sh/nodepool: spot
