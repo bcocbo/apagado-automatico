@@ -6,6 +6,7 @@ namespace: task-scheduler
 resources:
 - namespace.yaml
 - kubectl-runner-rbac.yaml
+- kubectl-runner-cluster-rbac.yaml
 - task-scheduler-deployment.yaml
 - task-scheduler-service.yaml
 - business-hours-config.yaml
